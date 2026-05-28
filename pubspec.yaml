@@ -1,0 +1,55 @@
+name: printer_agent
+description: Cross-platform POS print agent for Windows and Android.
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # ── Socket ──────────────────────────────────
+  socket_io_client: ^2.0.3+1
+
+  # ── ESC/POS formatter (all printer types) ───
+  esc_pos_utils_plus: ^2.0.3
+  usb_serial: ^0.5.0
+
+  # ── Printer drivers (LAN + USB + Android BT)─
+  # flutter_pos_printer_platform_image_3: ^1.2.1
+  flutter_thermal_printer: ^2.0.1
+  thermal_printer_plus: ^1.0.0
+
+  # ── Windows Bluetooth only ──────────────────
+  flutter_thermal_printer_windows: ^0.0.1
+
+  flutter_blue_plus: ^1.31.15
+
+  # ── Android background service (socket lives here)
+  flutter_background_service: ^5.0.10
+  flutter_local_notifications: ^17.2.2
+
+  # ── Android runtime permissions ─────────────
+  permission_handler: ^11.3.1
+
+  # ── Windows system tray ─────────────────────
+  system_tray: ^2.0.3
+
+  # ── Save printer configs ─────────────────────
+  shared_preferences: ^2.3.2
+
+  # ── Unique job IDs ───────────────────────────
+  uuid: ^3.0.7
+  http: ^1.2.0
+  win32: ^5.5.3
+  ffi: ^2.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
