@@ -19,7 +19,7 @@ dependencies:
 
   # ── Printer drivers (LAN + USB + Android BT)─
   # flutter_pos_printer_platform_image_3: ^1.2.1
-  flutter_thermal_printer: ^2.0.1
+  flutter_thermal_printer: ^1.2.1+1
   thermal_printer_plus: ^1.0.0
 
   # ── Windows Bluetooth only ──────────────────
@@ -33,6 +33,7 @@ dependencies:
 
   # ── Android runtime permissions ─────────────
   permission_handler: ^11.3.1
+  device_info_plus: ^10.1.0
 
   # ── Windows system tray ─────────────────────
   system_tray: ^2.0.3
@@ -40,11 +41,16 @@ dependencies:
   # ── Save printer configs ─────────────────────
   shared_preferences: ^2.3.2
 
+  # ── PDF ─────────────────────
+  pdf: ^3.11.3
+  printing: ^5.14.2
+
   # ── Unique job IDs ───────────────────────────
   uuid: ^3.0.7
   http: ^1.2.0
   win32: ^5.5.3
   ffi: ^2.1.0
+  get: ^4.6.6
 
 dev_dependencies:
   flutter_test:
@@ -53,3 +59,53 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: assets/fonts/Roboto-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Roboto-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Roboto-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/Roboto-Black.ttf
+          weight: 900
+    - family: Poppins
+      fonts:
+        - asset: assets/fonts/Poppins-Light.ttf
+          weight: 300
+        - asset: assets/fonts/Poppins-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Poppins-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Poppins-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Poppins-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/Poppins-Black.ttf
+          weight: 900
+    - family: Montserrat
+      fonts:
+        - asset: assets/fonts/Montserrat-Black.ttf
+          weight: 900
+        - asset: assets/fonts/Montserrat-ExtraBold.ttf
+          weight: 800
+        - asset: assets/fonts/Montserrat-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/Montserrat-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Montserrat-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Montserrat-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Montserrat-Light.ttf
+          weight: 300
+        - asset: assets/fonts/Montserrat-ExtraLight.ttf
+          weight: 200
+        - asset: assets/fonts/Montserrat-Thin.ttf
+          weight: 100
+    - family: Rupee_Foradian
+      fonts:
+        - asset: assets/fonts/Rupee_Foradian.ttf
+          weight: 400

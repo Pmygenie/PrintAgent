@@ -12,6 +12,7 @@ class RestaurantProfileModel {
   final String fssai;
   final String footerText;
   final String deliveryContactNo;
+  final String kotLanguage;
 
   const RestaurantProfileModel({
     required this.restaurantName,
@@ -27,6 +28,7 @@ class RestaurantProfileModel {
     required this.fssai,
     required this.footerText,
     required this.deliveryContactNo,
+    this.kotLanguage = 'English',
   });
 
   factory RestaurantProfileModel.empty() {
@@ -56,7 +58,10 @@ class RestaurantProfileModel {
     final vatInfo = json['vat_info'] is Map
         ? Map<String, dynamic>.from(json['vat_info'] as Map)
         : <String, dynamic>{};
-        
+
+    final settings = restaurant['settings'] is Map
+        ? Map<String, dynamic>.from(restaurant['settings'] as Map)
+        : <String, dynamic>{};
 
     return RestaurantProfileModel(
       restaurantName: restaurant['name']?.toString() ?? '',
@@ -72,6 +77,7 @@ class RestaurantProfileModel {
       fssai: restaurant['fssai']?.toString() ?? '',
       footerText: restaurant['footer_text']?.toString() ?? '',
       deliveryContactNo: restaurant['delivery_contact_no']?.toString() ?? '',
+      kotLanguage: settings['kot_language']?.toString() ?? 'English',
     );
   }
 
@@ -90,6 +96,7 @@ class RestaurantProfileModel {
       fssai: json['fssai']?.toString() ?? '',
       footerText: json['footerText']?.toString() ?? '',
       deliveryContactNo: json['deliveryContactNo']?.toString() ?? '',
+      kotLanguage: json['kotLanguage']?.toString() ?? 'English',
     );
   }
 
@@ -108,6 +115,7 @@ class RestaurantProfileModel {
       'fssai': fssai,
       'footerText': footerText,
       'deliveryContactNo': deliveryContactNo,
+      'kotLanguage': kotLanguage,
     };
   }
 

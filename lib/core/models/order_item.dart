@@ -1,6 +1,7 @@
 class OrderItem {
   final String name;
-  final int quantity;
+  final double quantity;
+  final String itemUnit;
   final double price; // base food price
   final String note;
   final String? station;
@@ -10,10 +11,13 @@ class OrderItem {
   final double variationTotal;
   final double addonTotal;
   final int? foodStatus;
+  final double itemUnitPrice;
+  final DateTime? createdAt;
 
   const OrderItem({
     required this.name,
     required this.quantity,
+    this.itemUnit = '',
     required this.price,
     this.note = '',
     this.station,
@@ -23,7 +27,8 @@ class OrderItem {
     this.variationTotal = 0.0,
     this.addonTotal = 0.0,
     this.foodStatus,
-
+    this.itemUnitPrice = 0.0,
+    this.createdAt,
   });
 
   factory OrderItem.fromJson(Map<String, dynamic> detail) {
@@ -31,7 +36,6 @@ class OrderItem {
 
     final variationData = (detail['variation'] as List?) ?? const [];
     final addOnData = (detail['add_ons'] as List?) ?? const [];
-    
 
     final List<String> variations = [];
     double variationTotal = 0.0;
@@ -42,7 +46,7 @@ class OrderItem {
       final values = (map['values'] as List?) ?? const [];
 
       final labels = <String>[];
-      double groupTotal = 0.0;
+      // double groupTotal = 0.0;
 
       for (final val in values) {
         final valueMap = Map<String, dynamic>.from(val as Map);
@@ -54,14 +58,16 @@ class OrderItem {
           labels.add(label);
         }
 
-        groupTotal += optionPrice;
+        // groupTotal += optionPrice;
         variationTotal += optionPrice;
       }
 
       if (groupName.isNotEmpty && labels.isNotEmpty) {
-        final priceText =
-            groupTotal > 0 ? ' (+${groupTotal.toStringAsFixed(0)})' : '';
-        variations.add('${labels.join(', ')}$priceText');
+        // Bill: show variation name only (no price in brackets)
+        // final priceText =
+        //     groupTotal > 0 ? ' (+${groupTotal.toStringAsFixed(0)})' : '';
+        // variations.add('${labels.join(', ')}$priceText');
+        variations.add(labels.join(', '));
       }
     }
 
@@ -88,7 +94,13 @@ class OrderItem {
 
     return OrderItem(
       name: food['name']?.toString() ?? 'Unknown Item',
-      quantity: int.tryParse(detail['quantity']?.toString() ?? '1') ?? 1,
+      quantity: double.tryParse(
+            detail['quantity']?.toString() ?? '1',
+          ) ??
+          1.0,
+      itemUnit: (detail['item_unit']?.toString().isNotEmpty == true)
+          ? detail['item_unit'].toString() ?? ''
+          : (food['item_unit']?.toString() ?? ''),
       price: double.tryParse(food['price']?.toString() ?? '0') ?? 0.0,
       note: detail['food_level_notes']?.toString().isNotEmpty == true
           ? detail['food_level_notes'].toString()
@@ -102,6 +114,15 @@ class OrderItem {
       foodStatus: detail['food_status'] is int
           ? detail['food_status']
           : int.tryParse(detail['food_status']?.toString() ?? ''),
+      itemUnitPrice: double.tryParse(
+            detail['item_unit_price']?.toString() ??
+                food['item_unit_price']?.toString() ??
+                '0',
+          ) ??
+          0.0,
+      createdAt: detail['created_at'] != null
+          ? DateTime.tryParse(detail['created_at'].toString())?.toLocal()
+          : null,
     );
   }
 }

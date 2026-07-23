@@ -122,12 +122,13 @@
 import 'dart:io';
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:flutter/material.dart';
+import 'package:get/get_navigation/src/root/get_material_app.dart';
 import 'package:permission_handler/permission_handler.dart';
-
+import 'package:device_info_plus/device_info_plus.dart';
 import 'core/config/print_config.dart';
 import 'core/models/printer_config.dart';
-import 'core/printer/printer_manager.dart';
-import 'core/queue/print_queue.dart';
+import 'core/queue/print_queue_manager.dart';
+import 'core/router/printer_router.dart';
 import 'core/socket/windows_socket_service.dart';
 import 'core/background/background_service.dart';
 import 'core/profile/restaurant_profile_api.dart';
@@ -142,7 +143,7 @@ void main() async {
   await PrintConfig.load();
   final savedPrinters = await PrinterConfigStorage.load();
 
-  // ✅ NEW — sync restaurant profile in background
+  // Sync restaurant profile in background (fire and forget)
   _syncRestaurantProfileOnStart();
 
   // 2. Request Android permissions
@@ -158,41 +159,58 @@ void main() async {
 
   // 3. Android → init background service
   if (Platform.isAndroid) {
+    print('📱 Initializing Android Environment...');
+
+    final deviceInfo = DeviceInfoPlugin();
+    final androidInfo = await deviceInfo.androidInfo;
+    final sdkInt = androidInfo.version.sdkInt;
+
+    List<Permission> permissionsToRequest = [];
+
+    if (sdkInt <= 30) {
+      permissionsToRequest = [
+        Permission.location,
+        Permission.bluetooth,
+        Permission.notification,
+        Permission.ignoreBatteryOptimizations,
+      ];
+    } else {
+      permissionsToRequest = [
+        Permission.bluetoothScan,
+        Permission.bluetoothConnect,
+        Permission.notification,
+        Permission.ignoreBatteryOptimizations,
+      ];
+    }
+
+    await permissionsToRequest.request();
+
     print('🔌 Android USB → vendorId=${PrintConfig.usbVendorId} productId=${PrintConfig.usbProductId}');
-    await [
-      Permission.bluetooth,
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-      Permission.notification,
-      Permission.ignoreBatteryOptimizations,
-    ].request();
 
     await initBackgroundService();
 
-    // ✅ Android — LAN or USB based on connectionType
     final androidPrinters = savedPrinters.isNotEmpty
         ? savedPrinters
         : [_buildDefaultPrinterConfig()];
 
-    final androidManager = PrinterManager()..registerAll(androidPrinters);
-    final androidQueue = PrintQueue(androidManager);
-    final androidSocket = WindowsSocketService(androidQueue)..connect();
+    final androidQueueManager = PrintQueueManager()..registerAll(androidPrinters);
+    final androidRouter       = PrinterRouter(androidPrinters);
+    final androidSocket       = WindowsSocketService(androidQueueManager, androidRouter)..connect();
 
-    runApp(PrintAgentApp(windowsSocket: androidSocket, queue: androidQueue));
+    runApp(PrintAgentApp(windowsSocket: androidSocket, queueManager: androidQueueManager));
     return;
   }
 
   // 4. Windows → socket in main isolate
-  // ✅ LAN or USB based on connectionType
   final printers = savedPrinters.isNotEmpty
       ? savedPrinters
       : [_buildDefaultPrinterConfig()];
 
-  final manager = PrinterManager()..registerAll(printers);
-  final queue = PrintQueue(manager);
-  final socket = WindowsSocketService(queue)..connect();
+  final queueManager = PrintQueueManager()..registerAll(printers);
+  final router       = PrinterRouter(printers);
+  final socket       = WindowsSocketService(queueManager, router)..connect();
 
-  runApp(PrintAgentApp(windowsSocket: socket, queue: queue));
+  runApp(PrintAgentApp(windowsSocket: socket, queueManager: queueManager));
 }
 
 Future<void> _syncRestaurantProfileOnStart() async {
@@ -220,51 +238,71 @@ Future<void> _syncRestaurantProfileOnStart() async {
   }
 }
 
-// ✅ NEW — builds PrinterConfig from PrintConfig.connectionType
+/// Builds a single fallback [PrinterConfig] from [PrintConfig] global settings.
+/// Used when no printers have been saved to disk yet (first launch).
+/// The fallback printer handles all stations + bill so the app works out-of-the-box.
 PrinterConfig _buildDefaultPrinterConfig() {
+  final currentPaperSize = PrintConfig.is80mm ? PaperSize.mm80 : PaperSize.mm58;
+
   if (PrintConfig.connectionType == PrinterConnectionType.lan) {
     print('🌐 LAN Printer → ${PrintConfig.lanIp}:${PrintConfig.lanPort}');
     return PrinterConfig(
-      id: 'kitchen_printer',
-      label: 'Kitchen Printer',
-      type: PrinterType.lan,
-      ipAddress: PrintConfig.lanIp,
-      port: PrintConfig.lanPort,
-      paperSize: PrintConfig.paperSize,
+      id:               'kitchen_printer',
+      label:            'Kitchen Printer',
+      type:             PrinterType.lan,
+      ipAddress:        PrintConfig.lanIp,
+      port:             PrintConfig.lanPort,
+      paperSize:        currentPaperSize,
+      handledStations:  PrintConfig.stations,
+      handlesBill:      true,
     );
   }
 
-  // USB — Windows or Android
+  if (PrintConfig.connectionType == PrinterConnectionType.bluetooth) {
+    print('🔵 Bluetooth Printer → macAddress=${PrintConfig.macAddress}');
+    return PrinterConfig(
+      id:               'kitchen_printer',
+      label:            'Kitchen Printer',
+      type:             PrinterType.bluetooth,
+      macAddress:       PrintConfig.macAddress,
+      paperSize:        currentPaperSize,
+      handledStations:  PrintConfig.stations,
+      handlesBill:      true,
+    );
+  }
+
   print('🖨️ USB Printer → ${PrintConfig.printerName} / vendor=${PrintConfig.usbVendorId}');
   return PrinterConfig(
-    id: 'kitchen_printer',
-    label: 'Kitchen Printer',
-    type: PrinterType.usb,
+    id:                 'kitchen_printer',
+    label:              'Kitchen Printer',
+    type:               PrinterType.usb,
     windowsPrinterName: PrintConfig.printerName,
-    vendorId: PrintConfig.usbVendorId,
-    productId: PrintConfig.usbProductId,
-    paperSize: PrintConfig.paperSize,
+    vendorId:           PrintConfig.usbVendorId,
+    productId:          PrintConfig.usbProductId,
+    paperSize:          currentPaperSize,
+    handledStations:    PrintConfig.stations,
+    handlesBill:        true,
   );
 }
 
 class PrintAgentApp extends StatelessWidget {
   final WindowsSocketService? windowsSocket;
-  final PrintQueue? queue;
+  final PrintQueueManager? queueManager;
 
   const PrintAgentApp({
     super.key,
     required this.windowsSocket,
-    required this.queue,
+    required this.queueManager,
   });
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return GetMaterialApp(
       title: 'Print Agent',
       theme: ThemeData.dark(useMaterial3: true),
       home: HomeScreen(
         windowsSocket: windowsSocket,
-        queue: queue,
+        queueManager:  queueManager,
       ),
       debugShowCheckedModeBanner: false,
     );

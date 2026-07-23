@@ -1,532 +1,3 @@
-// import 'dart:io';
-
-// import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
-// import 'package:flutter/material.dart';
-// import 'package:flutter_thermal_printer/flutter_thermal_printer.dart';
-// import 'package:flutter_thermal_printer/utils/printer.dart';
-// import '../../core/config/print_config.dart';
-
-// class SettingsScreen extends StatefulWidget {
-//   final VoidCallback onSaved;
-//   const SettingsScreen({super.key, required this.onSaved});
-
-//   @override
-//   State<SettingsScreen> createState() => _SettingsScreenState();
-// }
-
-// class _SettingsScreenState extends State<SettingsScreen> {
-//   final _restaurantIdCtrl = TextEditingController();
-//   final _empIdCtrl = TextEditingController();
-//   final _serverUrlCtrl = TextEditingController();
-//   final _apiUrlCtrl = TextEditingController();
-//   final _authTokenCtrl = TextEditingController();
-//   final _printerNameCtrl = TextEditingController();
-//   final _restaurantNameCtrl = TextEditingController();
-//   final _kotCopiesCtrl = TextEditingController();
-//   final _billCopiesCtrl = TextEditingController();
-//   final _customStationCtrl = TextEditingController(); // ✅ NEW
-
-//   PaperSize _paperSize = PaperSize.mm58;
-//   bool _autoPrint = true;
-//   bool _autoPrintBill = true;
-//   bool _obscureToken = true;
-
-//   // ✅ NEW — station toggles
-//   bool _kdsEnabled = false;
-//   bool _barEnabled = false;
-//   List<String> _customStations = []; // e.g. ['PIZZA', 'GRILL']
-
-//   List<Printer> _foundUsbPrinters = [];
-//   Printer? _selectedUsbPrinter;
-
-//   @override
-//   void initState() {
-//     super.initState();
-//     _loadValues();
-//   }
-
-//   void _loadValues() {
-//     _restaurantIdCtrl.text = PrintConfig.restaurantId.toString();
-//     _empIdCtrl.text = PrintConfig.empId;
-//     _serverUrlCtrl.text = PrintConfig.serverUrl;
-//     _apiUrlCtrl.text = PrintConfig.apiUrl;
-//     _authTokenCtrl.text = PrintConfig.authToken;
-//     _printerNameCtrl.text = PrintConfig.printerName;
-//     _restaurantNameCtrl.text = PrintConfig.restaurantName;
-//     _kotCopiesCtrl.text = PrintConfig.kotCopies.toString();
-//     _billCopiesCtrl.text = PrintConfig.billCopies.toString();
-//     _autoPrint = PrintConfig.autoPrint;
-//     _autoPrintBill = PrintConfig.autoPrintBill;
-//     _paperSize = PrintConfig.paperSize;
-
-//     // ✅ Derive switches from saved stations set
-//     final saved = PrintConfig.stations.map((s) => s.toUpperCase()).toSet();
-//     _kdsEnabled = saved.contains('KDS');
-//     _barEnabled = saved.contains('BAR');
-//     // Anything that's not KDS or BAR → custom
-//     _customStations = saved.where((s) => s != 'KDS' && s != 'BAR').toList();
-//   }
-
-//   // ✅ Merge KDS + BAR + custom back into PrintConfig.stations
-//   Set<String> _buildStationsSet() {
-//     final merged = <String>{};
-//     if (_kdsEnabled) merged.add('KDS');
-//     if (_barEnabled) merged.add('BAR');
-//     merged.addAll(_customStations.map((s) => s.toUpperCase()));
-//     return merged;
-//   }
-
-//   Future<void> _save() async {
-//     if (_serverUrlCtrl.text.isEmpty ||
-//         _authTokenCtrl.text.isEmpty ||
-//         _printerNameCtrl.text.isEmpty ||
-//         _empIdCtrl.text.isEmpty) {
-//       _showError('Server URL, Token, Printer Name and Emp ID are required');
-//       return;
-//     }
-
-//     PrintConfig.restaurantId = int.tryParse(_restaurantIdCtrl.text) ?? 618;
-//     PrintConfig.empId = _empIdCtrl.text.trim();
-//     PrintConfig.serverUrl = _serverUrlCtrl.text.trim();
-//     PrintConfig.apiUrl = _apiUrlCtrl.text.trim();
-//     PrintConfig.authToken = _authTokenCtrl.text.trim();
-//     PrintConfig.printerName = _printerNameCtrl.text.trim();
-//     PrintConfig.restaurantName = _restaurantNameCtrl.text.trim();
-//     PrintConfig.kotCopies = int.tryParse(_kotCopiesCtrl.text) ?? 1;
-//     PrintConfig.billCopies = int.tryParse(_billCopiesCtrl.text) ?? 1;
-//     PrintConfig.autoPrint = _autoPrint;
-//     PrintConfig.autoPrintBill = _autoPrintBill;
-//     PrintConfig.paperSize = _paperSize;
-//     PrintConfig.stations = _buildStationsSet();
-
-//     //  ADD THESE — save selected USB printer
-//     // ── _save() — fixed USB block ──
-//     if (_selectedUsbPrinter != null) {
-//       PrintConfig.usbVendorId =
-//           int.tryParse(_selectedUsbPrinter!.vendorId ?? '0') ?? 0;
-//       PrintConfig.usbProductId =
-//           int.tryParse(_selectedUsbPrinter!.productId ?? '0') ?? 0;
-//     }
-
-//     await PrintConfig.save(); // ✅ now saves vendorId + productId too
-
-//     widget.onSaved();
-
-//     if (mounted) {
-//       ScaffoldMessenger.of(context).showSnackBar(
-//         const SnackBar(
-//           content: Text('✅ Settings saved — reconnecting socket...'),
-//           backgroundColor: Colors.green,
-//         ),
-//       );
-//       Future.delayed(const Duration(seconds: 1), () {
-//         if (mounted) Navigator.pop(context);
-//       });
-//     }
-//   }
-
-//   void _showError(String msg) {
-//     ScaffoldMessenger.of(context).showSnackBar(
-//       SnackBar(content: Text('❌ $msg'), backgroundColor: Colors.red),
-//     );
-//   }
-
-//   void _addCustomStation() {
-//     final val = _customStationCtrl.text.trim().toUpperCase();
-//     if (val.isEmpty) return;
-//     if (val == 'KDS' || val == 'BAR') {
-//       _showError('Use the KDS/BAR toggle above instead');
-//       return;
-//     }
-//     if (_customStations.contains(val)) {
-//       _showError('Station $val already added');
-//       return;
-//     }
-//     setState(() {
-//       _customStations.add(val);
-//       _customStationCtrl.clear();
-//     });
-//   }
-
-//   Future<void> _scanUsbPrinters() async {
-//     try {
-//       final plugin = FlutterThermalPrinter.instance;
-//       await plugin.getPrinters(connectionTypes: [ConnectionType.USB]);
-//       plugin.devicesStream.listen((List<Printer> printers) {
-//         if (mounted) setState(() => _foundUsbPrinters = printers);
-//       });
-//     } catch (e) {
-//       _showError('USB scan failed: $e');
-//     }
-//   }
-
-//   @override
-//   void dispose() {
-//     _restaurantIdCtrl.dispose();
-//     _empIdCtrl.dispose();
-//     _serverUrlCtrl.dispose();
-//     _apiUrlCtrl.dispose();
-//     _authTokenCtrl.dispose();
-//     _printerNameCtrl.dispose();
-//     _restaurantNameCtrl.dispose();
-//     _kotCopiesCtrl.dispose();
-//     _billCopiesCtrl.dispose();
-//     _customStationCtrl.dispose(); // ✅ NEW
-//     super.dispose();
-//   }
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return Scaffold(
-//       appBar: AppBar(
-//         title: const Text('⚙️ Settings'),
-//         actions: [
-//           TextButton.icon(
-//             icon: const Icon(Icons.save, color: Colors.white),
-//             label: const Text('Save', style: TextStyle(color: Colors.white)),
-//             onPressed: _save,
-//           ),
-//         ],
-//       ),
-//       body: ListView(
-//         padding: const EdgeInsets.all(16),
-//         children: [
-//           // ── Server ──────────────────────────────────
-//           _sectionHeader('🌐 Server'),
-//           _field(
-//               controller: _serverUrlCtrl,
-//               label: 'Socket URL',
-//               hint: 'http://presocket.mygenie.online',
-//               icon: Icons.electrical_services),
-//           _field(
-//               controller: _apiUrlCtrl,
-//               label: 'API URL',
-//               hint: 'https://preprod.mygenie.online',
-//               icon: Icons.api),
-//           _tokenField(),
-//           const SizedBox(height: 16),
-
-//           // ── Identity ─────────────────────────────────
-//           _sectionHeader('🏪 Identity'),
-//           _field(
-//               controller: _restaurantIdCtrl,
-//               label: 'Restaurant ID',
-//               hint: '618',
-//               icon: Icons.restaurant,
-//               numeric: true),
-//           _field(
-//               controller: _empIdCtrl,
-//               label: 'Employee ID (emp_code)',
-//               hint: '002',
-//               icon: Icons.badge),
-//           _field(
-//               controller: _restaurantNameCtrl,
-//               label: 'Restaurant Name (for bill header)',
-//               hint: 'Hogwarts',
-//               icon: Icons.storefront),
-//           const SizedBox(height: 16),
-
-//           // ── Printer ──────────────────────────────────
-//           _sectionHeader('🖨️ Printer'),
-//           _field(
-//               controller: _printerNameCtrl,
-//               label: 'Windows Printer Name',
-//               hint: 'Everycom-printer',
-//               icon: Icons.print),
-//           Padding(
-//             padding: const EdgeInsets.only(bottom: 12),
-//             child: DropdownButtonFormField<PaperSize>(
-//               value: _paperSize,
-//               decoration: const InputDecoration(
-//                 labelText: 'Paper Size',
-//                 prefixIcon: Icon(Icons.straighten),
-//                 border: OutlineInputBorder(),
-//                 filled: true,
-//               ),
-//               items: const [
-//                 DropdownMenuItem(
-//                     value: PaperSize.mm58,
-//                     child: Text('58mm  —  Small receipt')),
-//                 DropdownMenuItem(
-//                     value: PaperSize.mm80,
-//                     child: Text('80mm  —  Wide receipt')),
-//               ],
-//               onChanged: (v) =>
-//                   setState(() => _paperSize = v ?? PaperSize.mm58),
-//             ),
-//           ),
-//           _field(
-//               controller: _billCopiesCtrl,
-//               label: 'BILL Copies',
-//               hint: '1',
-//               icon: Icons.content_copy,
-//               numeric: true),
-//           const SizedBox(height: 12),
-
-//               _field(
-//               controller: _kotCopiesCtrl,
-//               label: 'KOT Copies',
-//               hint: '1',
-//               icon: Icons.content_copy,
-//               numeric: true),
-//           const SizedBox(height: 16),
-
-//           // ── Android USB Printer ──────────────────────────
-//           if (Platform.isAndroid) ...[
-//             _sectionHeader('📱 Android USB Printer'),
-//             const Padding(
-//               padding: EdgeInsets.only(bottom: 8),
-//               child: Text(
-//                 'Connect your thermal printer via USB OTG cable, then scan.',
-//                 style: TextStyle(color: Colors.grey, fontSize: 12),
-//               ),
-//             ),
-//             ElevatedButton.icon(
-//               icon: const Icon(Icons.usb),
-//               label: const Text('Scan USB Printers'),
-//               onPressed: _scanUsbPrinters,
-//               style: ElevatedButton.styleFrom(
-//                 minimumSize: const Size(double.infinity, 48),
-//               ),
-//             ),
-//             const SizedBox(height: 8),
-//             if (_foundUsbPrinters.isNotEmpty)
-//               DropdownButtonFormField<Printer>(
-//                 items: _foundUsbPrinters
-//                     .map((p) => DropdownMenuItem<Printer>(
-//                           value: p,
-//                           child: Text('${p.name ?? 'Printer'} — ${p.vendorId}'),
-//                         ))
-//                     .toList(),
-//                 // ── Dropdown onChanged — fixed ──
-//                 onChanged: (Printer? p) {
-//                   if (p == null) return;
-//                   setState(
-//                       () => _selectedUsbPrinter = p); // ✅ store full Printer
-//                   PrintConfig.usbVendorId =
-//                       int.tryParse(p.vendorId ?? '0') ?? 0;
-//                   PrintConfig.usbProductId =
-//                       int.tryParse(p.productId ?? '0') ?? 0;
-//                 },
-//               ),
-//             // Show currently saved printer
-//             if (PrintConfig.usbVendorId != 0)
-//               Padding(
-//                 padding: const EdgeInsets.only(top: 8),
-//                 child: Text(
-//                   '✅ Saved: vendor=${PrintConfig.usbVendorId} product=${PrintConfig.usbProductId}',
-//                   style: const TextStyle(color: Colors.green, fontSize: 12),
-//                 ),
-//               ),
-//             const SizedBox(height: 16),
-//           ],
-
-//           // ── KOT Stations ✅ NEW ───────────────────────
-//           // _sectionHeader('🍽️ KOT Stations'),
-//           // const Padding(
-//           //   padding: EdgeInsets.only(bottom: 8),
-//           //   child: Text(
-//           //     'Select which stations this device prints KOT for.\n'
-//           //     'Each matched station prints a separate KOT.',
-//           //     style: TextStyle(color: Colors.grey, fontSize: 12),
-//           //   ),
-//           // ),
-
-//           // // KDS toggle
-//           // Card(
-//           //   child: SwitchListTile(
-//           //     secondary: const Icon(Icons.tv, color: Colors.tealAccent),
-//           //     title: const Text('KDS Station'),
-//           //     subtitle: const Text('Kitchen Display System items'),
-//           //     value: _kdsEnabled,
-//           //     onChanged: (v) => setState(() => _kdsEnabled = v),
-//           //   ),
-//           // ),
-
-//           // // BAR toggle
-//           // Card(
-//           //   child: SwitchListTile(
-//           //     secondary:
-//           //         const Icon(Icons.local_bar, color: Colors.orangeAccent),
-//           //     title: const Text('BAR Station'),
-//           //     subtitle: const Text('Bar / Beverages items'),
-//           //     value: _barEnabled,
-//           //     onChanged: (v) => setState(() => _barEnabled = v),
-//           //   ),
-//           // ),
-
-//           // const SizedBox(height: 8),
-
-//           // // Custom stations chips
-//           // if (_customStations.isNotEmpty) ...[
-//           //   const Text('Custom Stations:',
-//           //       style: TextStyle(fontSize: 13, color: Colors.grey)),
-//           //   const SizedBox(height: 6),
-//           //   Wrap(
-//           //     spacing: 8,
-//           //     runSpacing: 4,
-//           //     children: _customStations
-//           //         .map((station) => Chip(
-//           //               label: Text(station),
-//           //               backgroundColor: Colors.deepPurple.withOpacity(0.3),
-//           //               deleteIcon: const Icon(Icons.close, size: 16),
-//           //               onDeleted: () =>
-//           //                   setState(() => _customStations.remove(station)),
-//           //             ))
-//           //         .toList(),
-//           //   ),
-//           //   const SizedBox(height: 8),
-//           // ],
-
-//           // // Add custom station row
-//           // Row(children: [
-//           //   Expanded(
-//           //     child: TextField(
-//           //       controller: _customStationCtrl,
-//           //       textCapitalization: TextCapitalization.characters,
-//           //       decoration: const InputDecoration(
-//           //         labelText: 'Add Custom Station',
-//           //         hintText: 'e.g. PIZZA, GRILL',
-//           //         prefixIcon: Icon(Icons.add_circle_outline),
-//           //         border: OutlineInputBorder(),
-//           //         filled: true,
-//           //       ),
-//           //       onSubmitted: (_) => _addCustomStation(),
-//           //     ),
-//           //   ),
-//           //   const SizedBox(width: 8),
-//           //   ElevatedButton(
-//           //     onPressed: _addCustomStation,
-//           //     style: ElevatedButton.styleFrom(
-//           //         padding:
-//           //             const EdgeInsets.symmetric(horizontal: 16, vertical: 18)),
-//           //     child: const Text('Add'),
-//           //   ),
-//           // ]),
-
-//           // // ✅ Warning if no station selected
-//           // if (!_kdsEnabled && !_barEnabled && _customStations.isEmpty)
-//           //   Container(
-//           //     margin: const EdgeInsets.only(top: 10),
-//           //     padding: const EdgeInsets.all(10),
-//           //     decoration: BoxDecoration(
-//           //       color: Colors.orange.withOpacity(0.15),
-//           //       border: Border.all(color: Colors.orange),
-//           //       borderRadius: BorderRadius.circular(8),
-//           //     ),
-//           //     child: const Row(children: [
-//           //       Icon(Icons.warning_amber, color: Colors.orange, size: 18),
-//           //       SizedBox(width: 8),
-//           //       Expanded(
-//           //         child: Text(
-//           //           'No stations selected — KOT will NOT print for manual events',
-//           //           style: TextStyle(color: Colors.orange, fontSize: 12),
-//           //         ),
-//           //       ),
-//           //     ]),
-//           //   ),
-
-//           // const SizedBox(height: 16),
-
-//           // ── Auto Print ───────────────────────────────
-//           _sectionHeader('⚡ Auto Print'),
-//           _toggle(
-//               label: 'Auto Print KOT',
-//               subtitle: 'Print KOT when new order arrives',
-//               value: _autoPrint,
-//               onChanged: (v) => setState(() => _autoPrint = v)),
-//           _toggle(
-//               label: 'Auto Print Bill',
-//               subtitle: 'Print bill on manual_print event',
-//               value: _autoPrintBill,
-//               onChanged: (v) => setState(() => _autoPrintBill = v)),
-
-//           const SizedBox(height: 32),
-
-//           SizedBox(
-//             width: double.infinity,
-//             height: 48,
-//             child: ElevatedButton.icon(
-//               icon: const Icon(Icons.save),
-//               label: const Text('Save & Reconnect',
-//                   style: TextStyle(fontSize: 16)),
-//               onPressed: _save,
-//               style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-//             ),
-//           ),
-//           const SizedBox(height: 16),
-//         ],
-//       ),
-//     );
-//   }
-
-//   Widget _sectionHeader(String title) => Padding(
-//         padding: const EdgeInsets.only(bottom: 8),
-//         child: Text(title,
-//             style: const TextStyle(
-//                 fontSize: 16,
-//                 fontWeight: FontWeight.bold,
-//                 color: Colors.tealAccent)),
-//       );
-
-//   Widget _field({
-//     required TextEditingController controller,
-//     required String label,
-//     required String hint,
-//     required IconData icon,
-//     bool numeric = false,
-//   }) =>
-//       Padding(
-//         padding: const EdgeInsets.only(bottom: 12),
-//         child: TextField(
-//           controller: controller,
-//           keyboardType: numeric ? TextInputType.number : TextInputType.text,
-//           decoration: InputDecoration(
-//             labelText: label,
-//             hintText: hint,
-//             prefixIcon: Icon(icon),
-//             border: const OutlineInputBorder(),
-//             filled: true,
-//           ),
-//         ),
-//       );
-
-//   Widget _tokenField() => Padding(
-//         padding: const EdgeInsets.only(bottom: 12),
-//         child: TextField(
-//           controller: _authTokenCtrl,
-//           obscureText: _obscureToken,
-//           decoration: InputDecoration(
-//             labelText: 'Auth Token (Bearer)',
-//             hintText: 'FLwtm4SQ2nVv...',
-//             prefixIcon: const Icon(Icons.key),
-//             border: const OutlineInputBorder(),
-//             filled: true,
-//             suffixIcon: IconButton(
-//               icon:
-//                   Icon(_obscureToken ? Icons.visibility : Icons.visibility_off),
-//               onPressed: () => setState(() => _obscureToken = !_obscureToken),
-//             ),
-//           ),
-//         ),
-//       );
-
-//   Widget _toggle({
-//     required String label,
-//     required String subtitle,
-//     required bool value,
-//     required ValueChanged<bool> onChanged,
-//   }) =>
-//       Card(
-//         child: SwitchListTile(
-//           title: Text(label),
-//           subtitle: Text(subtitle),
-//           value: value,
-//           onChanged: onChanged,
-//         ),
-//       );
-// }
-
 import 'dart:io';
 
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
@@ -535,164 +6,148 @@ import 'package:flutter/services.dart';
 import 'package:flutter_thermal_printer/flutter_thermal_printer.dart';
 import 'package:flutter_thermal_printer/utils/printer.dart';
 import 'package:printer_agent/core/models/printer_config.dart';
-import 'package:printer_agent/core/queue/print_queue.dart';
+import 'package:printer_agent/core/queue/print_queue_manager.dart';
 import '../../core/config/print_config.dart';
 
 class SettingsScreen extends StatefulWidget {
   final VoidCallback onSaved;
-   final PrintQueue? queue;  
-  const SettingsScreen({super.key, required this.onSaved , this.queue,});
+  final PrintQueueManager? queueManager;
+
+  const SettingsScreen({
+    super.key,
+    required this.onSaved,
+    this.queueManager,
+  });
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  // ── Existing controllers ─────────────────────────────
-  final _restaurantIdCtrl = TextEditingController();
-  final _empIdCtrl = TextEditingController();
-  final _serverUrlCtrl = TextEditingController();
-  final _apiUrlCtrl = TextEditingController();
-  final _authTokenCtrl = TextEditingController();
-  final _printerNameCtrl = TextEditingController();
+  // ── Server / Identity controllers ────────────────────────────────────────
+  final _restaurantIdCtrl   = TextEditingController();
+  final _empIdCtrl          = TextEditingController();
+  final _serverUrlCtrl      = TextEditingController();
+  final _apiUrlCtrl         = TextEditingController();
+  final _authTokenCtrl      = TextEditingController();
   final _restaurantNameCtrl = TextEditingController();
-  final _kotCopiesCtrl = TextEditingController();
-  final _billCopiesCtrl = TextEditingController();
-  final _customStationCtrl = TextEditingController();
+  final _kotCopiesCtrl      = TextEditingController();
+  final _billCopiesCtrl     = TextEditingController();
 
-  // ✅ NEW — LAN controllers
-  final _lanIpCtrl = TextEditingController();
-  final _lanPortCtrl = TextEditingController(text: '9100');
-
-  // ── Existing state ───────────────────────────────────
-  PaperSize _paperSize = PaperSize.mm58;
-  bool _autoPrint = true;
+  // ── Global print toggles ─────────────────────────────────────────────────
+  bool _autoPrint     = true;
   bool _autoPrintBill = true;
-  bool _obscureToken = true;
-  bool _kdsEnabled = false;
-  bool _barEnabled = false;
-  List<String> _customStations = [];
-  List<Printer> _foundUsbPrinters = [];
-  Printer? _selectedUsbPrinter;
+  bool _aggregatorAutoKot  = false;
+  bool _aggregatorAutoBill = false;
+  bool _obscureToken  = true;
+  bool _is80mm        = false;
+  bool _usePdfPrintingOnWindows = true;
+  bool _showItemDateOn80mm = false;
 
-  // ✅ NEW — LAN state
-  PrinterConnectionType _connectionType = PrinterConnectionType.usb;
-  bool _isTestingLan = false;
-  String? _lanTestResult;
-  bool _lanTestSuccess = false;
+  // ── Multi-printer list (the core new state) ───────────────────────────────
+  List<PrinterConfig> _printers = [];
 
   @override
   void initState() {
     super.initState();
-    _loadValues();
+    _loadGlobalValues();
+    _loadSavedPrinters();
   }
 
-  void _loadValues() {
-    // ── Existing ─────────────────────────────────────
-    _restaurantIdCtrl.text = PrintConfig.restaurantId.toString();
-    _empIdCtrl.text = PrintConfig.empId;
-    _serverUrlCtrl.text = PrintConfig.serverUrl;
-    _apiUrlCtrl.text = PrintConfig.apiUrl;
-    _authTokenCtrl.text = PrintConfig.authToken;
-    _printerNameCtrl.text = PrintConfig.printerName;
-    _restaurantNameCtrl.text = PrintConfig.restaurantName;
-    _kotCopiesCtrl.text = PrintConfig.kotCopies.toString();
-    _billCopiesCtrl.text = PrintConfig.billCopies.toString();
-    _autoPrint = PrintConfig.autoPrint;
-    _autoPrintBill = PrintConfig.autoPrintBill;
-    _paperSize = PrintConfig.paperSize;
-
-    final saved = PrintConfig.stations.map((s) => s.toUpperCase()).toSet();
-    _kdsEnabled = saved.contains('KDS');
-    _barEnabled = saved.contains('BAR');
-    _customStations = saved.where((s) => s != 'KDS' && s != 'BAR').toList();
-
-    // ✅ NEW — LAN
-    _connectionType = PrintConfig.connectionType;
-    _lanIpCtrl.text = PrintConfig.lanIp;
-    _lanPortCtrl.text = PrintConfig.lanPort.toString();
+  @override
+  void dispose() {
+    _restaurantIdCtrl.dispose();
+    _empIdCtrl.dispose();
+    _serverUrlCtrl.dispose();
+    _apiUrlCtrl.dispose();
+    _authTokenCtrl.dispose();
+    _restaurantNameCtrl.dispose();
+    _kotCopiesCtrl.dispose();
+    _billCopiesCtrl.dispose();
+    super.dispose();
   }
 
-  Set<String> _buildStationsSet() {
-    final merged = <String>{};
-    if (_kdsEnabled) merged.add('KDS');
-    if (_barEnabled) merged.add('BAR');
-    merged.addAll(_customStations.map((s) => s.toUpperCase()));
-    return merged;
+  // ── Load ─────────────────────────────────────────────────────────────────
+  void _loadGlobalValues() {
+    _restaurantIdCtrl.text    = PrintConfig.restaurantId.toString();
+    _empIdCtrl.text           = PrintConfig.empId;
+    _serverUrlCtrl.text       = PrintConfig.serverUrl;
+    _apiUrlCtrl.text          = PrintConfig.apiUrl;
+    _authTokenCtrl.text       = PrintConfig.authToken;
+    _restaurantNameCtrl.text  = PrintConfig.restaurantName;
+    _kotCopiesCtrl.text       = PrintConfig.kotCopies.toString();
+    _billCopiesCtrl.text      = PrintConfig.billCopies.toString();
+    _autoPrint                = PrintConfig.autoPrint;
+    _autoPrintBill            = PrintConfig.autoPrintBill;
+    _aggregatorAutoKot        = PrintConfig.aggregatorAutoKot;
+    _aggregatorAutoBill       = PrintConfig.aggregatorAutoBill;
+    _is80mm                   = PrintConfig.is80mm;
+    _usePdfPrintingOnWindows  = PrintConfig.usePdfPrintingOnWindows;
+    _showItemDateOn80mm       = PrintConfig.showItemDateOn80mm;
   }
 
+  Future<void> _loadSavedPrinters() async {
+    final saved = await PrinterConfigStorage.load();
+    if (mounted) {
+      setState(() {
+        _printers = saved.isNotEmpty ? saved : [];
+      });
+    }
+  }
+
+  // ── Save ─────────────────────────────────────────────────────────────────
   Future<void> _save() async {
-    if (_serverUrlCtrl.text.isEmpty ||
-        _authTokenCtrl.text.isEmpty ||
-        _empIdCtrl.text.isEmpty) {
-      _showError('Server URL, Token and Emp ID are required');
+    if (_serverUrlCtrl.text.isEmpty || _authTokenCtrl.text.isEmpty || _empIdCtrl.text.isEmpty) {
+      _showError('Server URL, Token, and Emp ID are required');
       return;
     }
 
-    // ✅ Validate printer fields based on connection type
-    if (_connectionType == PrinterConnectionType.usb &&
-        _printerNameCtrl.text.isEmpty) {
-      _showError('Printer Name is required for USB');
-      return;
-    }
-    if (_connectionType == PrinterConnectionType.lan &&
-        _lanIpCtrl.text.isEmpty) {
-      _showError('IP Address is required for LAN');
+    if (_printers.isEmpty) {
+      _showError('Add at least one printer before saving');
       return;
     }
 
-    // ── Existing saves ────────────────────────────────
-    PrintConfig.restaurantId = int.tryParse(_restaurantIdCtrl.text) ?? 618;
-    PrintConfig.empId = _empIdCtrl.text.trim();
-    PrintConfig.serverUrl = _serverUrlCtrl.text.trim();
-    PrintConfig.apiUrl = _apiUrlCtrl.text.trim();
-    PrintConfig.authToken = _authTokenCtrl.text.trim();
-    PrintConfig.printerName = _printerNameCtrl.text.trim();
-    PrintConfig.restaurantName = _restaurantNameCtrl.text.trim();
-    PrintConfig.kotCopies = int.tryParse(_kotCopiesCtrl.text) ?? 1;
-    PrintConfig.billCopies = int.tryParse(_billCopiesCtrl.text) ?? 1;
-    PrintConfig.autoPrint = _autoPrint;
-    PrintConfig.autoPrintBill = _autoPrintBill;
-    PrintConfig.paperSize = _paperSize;
-    PrintConfig.stations = _buildStationsSet();
+    // Write global config to memory
+    PrintConfig.restaurantId             = int.tryParse(_restaurantIdCtrl.text) ?? 0;
+    PrintConfig.empId                    = _empIdCtrl.text.trim();
+    PrintConfig.serverUrl                = _serverUrlCtrl.text.trim();
+    PrintConfig.apiUrl                   = _apiUrlCtrl.text.trim();
+    PrintConfig.authToken                = _authTokenCtrl.text.trim();
+    PrintConfig.restaurantName           = _restaurantNameCtrl.text.trim();
+    PrintConfig.kotCopies                = int.tryParse(_kotCopiesCtrl.text) ?? 1;
+    PrintConfig.billCopies               = int.tryParse(_billCopiesCtrl.text) ?? 1;
+    PrintConfig.autoPrint                = _autoPrint;
+    PrintConfig.autoPrintBill            = _autoPrintBill;
+    PrintConfig.aggregatorAutoKot        = _aggregatorAutoKot;
+    PrintConfig.aggregatorAutoBill       = _aggregatorAutoBill;
+    PrintConfig.is80mm                   = _is80mm;
+    PrintConfig.usePdfPrintingOnWindows  = _usePdfPrintingOnWindows;
+    PrintConfig.showItemDateOn80mm       = _showItemDateOn80mm;
 
-    if (_selectedUsbPrinter != null) {
-      PrintConfig.usbVendorId =
-          int.tryParse(_selectedUsbPrinter!.vendorId ?? '0') ?? 0;
-      PrintConfig.usbProductId =
-          int.tryParse(_selectedUsbPrinter!.productId ?? '0') ?? 0;
-    }
-
-    // ✅ LAN saves
-    PrintConfig.connectionType = _connectionType;
-    PrintConfig.lanIp = _lanIpCtrl.text.trim();
-    PrintConfig.lanPort = int.tryParse(_lanPortCtrl.text) ?? 9100;
+    // Derive legacy single-printer fields from first printer for backward compat
+    final first = _printers.first;
+    PrintConfig.connectionType = first.type == PrinterType.lan
+        ? PrinterConnectionType.lan
+        : first.type == PrinterType.bluetooth
+            ? PrinterConnectionType.bluetooth
+            : PrinterConnectionType.usb;
+    PrintConfig.lanIp              = first.ipAddress ?? '';
+    PrintConfig.lanPort            = first.port;
+    PrintConfig.macAddress         = first.macAddress ?? '';
+    PrintConfig.printerName        = first.windowsPrinterName ?? '';
+    PrintConfig.usbVendorId        = first.vendorId ?? 0;
+    PrintConfig.usbProductId       = first.productId ?? 0;
+    PrintConfig.stations           = _printers.expand((p) => p.handledStations).toSet();
 
     await PrintConfig.save();
-
-    // ✅ FIX — re-register printer with updated config so running
-    //          PrinterManager uses new settings without needing restart
-    final updatedConfig = PrinterConfig(
-      id: 'kitchen_printer',
-      label: 'Kitchen Printer',
-      type: _connectionType == PrinterConnectionType.lan
-          ? PrinterType.lan
-          : PrinterType.usb,
-      ipAddress: PrintConfig.lanIp,
-      port: PrintConfig.lanPort,
-      windowsPrinterName: PrintConfig.printerName,
-      vendorId: PrintConfig.usbVendorId,
-      productId: PrintConfig.usbProductId,
-      paperSize: PrintConfig.paperSize,
-    );
-    widget.queue?.manager.registerPrinter(updatedConfig);
+    await PrinterConfigStorage.save(_printers);
 
     widget.onSaved();
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✅ Settings saved — reconnecting socket...'),
+        SnackBar(
+          content: Text('✅ Saved! ${_printers.length} printer(s) configured'),
           backgroundColor: Colors.green,
         ),
       );
@@ -708,89 +163,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  void _addCustomStation() {
-    final val = _customStationCtrl.text.trim().toUpperCase();
-    if (val.isEmpty) return;
-    if (val == 'KDS' || val == 'BAR') {
-      _showError('Use the KDS/BAR toggle above instead');
-      return;
-    }
-    if (_customStations.contains(val)) {
-      _showError('Station $val already added');
-      return;
-    }
-    setState(() {
-      _customStations.add(val);
-      _customStationCtrl.clear();
-    });
+  // ── Add / Edit printer ────────────────────────────────────────────────────
+  void _showAddPrinterSheet({PrinterConfig? existing, int? editIndex}) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _PrinterFormSheet(
+        is80mm:       _is80mm,
+        initial:      existing,
+        onConfirmed:  (cfg) {
+          setState(() {
+            if (editIndex != null) {
+              _printers[editIndex] = cfg;
+            } else {
+              _printers.add(cfg);
+            }
+          });
+        },
+      ),
+    );
   }
 
-  Future<void> _scanUsbPrinters() async {
-    try {
-      final plugin = FlutterThermalPrinter.instance;
-      await plugin.getPrinters(connectionTypes: [ConnectionType.USB]);
-      plugin.devicesStream.listen((List<Printer> printers) {
-        if (mounted) setState(() => _foundUsbPrinters = printers);
-      });
-    } catch (e) {
-      _showError('USB scan failed: $e');
-    }
+  void _removePrinter(int index) {
+    setState(() => _printers.removeAt(index));
   }
 
-  // ✅ NEW — Test LAN connection
-  Future<void> _testLanConnection() async {
-    final ip = _lanIpCtrl.text.trim();
-    final port = int.tryParse(_lanPortCtrl.text) ?? 9100;
-
-    if (ip.isEmpty) {
-      _showError('Enter IP address first');
-      return;
-    }
-
-    setState(() {
-      _isTestingLan = true;
-      _lanTestResult = null;
-    });
-
-    try {
-      final socket = await Socket.connect(
-        ip,
-        port,
-        timeout: const Duration(seconds: 3),
-      );
-      await socket.close();
-      setState(() {
-        _lanTestSuccess = true;
-        _lanTestResult = '✅ Printer reachable at $ip:$port';
-      });
-    } catch (_) {
-      setState(() {
-        _lanTestSuccess = false;
-        _lanTestResult = '❌ Could not reach $ip:$port — check IP/port';
-      });
-    } finally {
-      setState(() => _isTestingLan = false);
-    }
-  }
-
-  @override
-  void dispose() {
-    _restaurantIdCtrl.dispose();
-    _empIdCtrl.dispose();
-    _serverUrlCtrl.dispose();
-    _apiUrlCtrl.dispose();
-    _authTokenCtrl.dispose();
-    _printerNameCtrl.dispose();
-    _restaurantNameCtrl.dispose();
-    _kotCopiesCtrl.dispose();
-    _billCopiesCtrl.dispose();
-    _customStationCtrl.dispose();
-    // ✅ NEW
-    _lanIpCtrl.dispose();
-    _lanPortCtrl.dispose();
-    super.dispose();
-  }
-
+  // ── Build ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -798,7 +199,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: const Text('⚙️ Settings'),
         actions: [
           TextButton.icon(
-            icon: const Icon(Icons.save, color: Colors.white),
+            icon:  const Icon(Icons.save, color: Colors.white),
             label: const Text('Save', style: TextStyle(color: Colors.white)),
             onPressed: _save,
           ),
@@ -807,258 +208,162 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // ── Server ────────────────────────────────────
+
+          // ── Server ──────────────────────────────────────────────────────
           _sectionHeader('🌐 Server'),
-          _field(
-            controller: _serverUrlCtrl,
-            label: 'Socket URL',
-            hint: 'http://presocket.mygenie.online',
-            icon: Icons.electrical_services,
-          ),
-          _field(
-            controller: _apiUrlCtrl,
-            label: 'API URL',
-            hint: 'https://preprod.mygenie.online',
-            icon: Icons.api,
-          ),
+          _field(controller: _serverUrlCtrl, label: 'Socket URL',
+              hint: 'http://socket.mygenie.online', icon: Icons.electrical_services),
+          _field(controller: _apiUrlCtrl, label: 'API URL',
+              hint: 'https://manage.mygenie.online', icon: Icons.api),
           _tokenField(),
           const SizedBox(height: 16),
 
-          // ── Identity ──────────────────────────────────
+          // ── Identity ────────────────────────────────────────────────────
           _sectionHeader('🏪 Identity'),
-          _field(
-            controller: _restaurantIdCtrl,
-            label: 'Restaurant ID',
-            hint: '618',
-            icon: Icons.restaurant,
-            numeric: true,
-          ),
-          _field(
-            controller: _empIdCtrl,
-            label: 'Employee ID (emp_code)',
-            hint: '002',
-            icon: Icons.badge,
-          ),
-          _field(
-            controller: _restaurantNameCtrl,
-            label: 'Restaurant Name (for bill header)',
-            hint: 'Hogwarts',
-            icon: Icons.storefront,
-          ),
+          _field(controller: _restaurantIdCtrl, label: 'Restaurant ID',
+              hint: '1', icon: Icons.restaurant, numeric: true),
+          _field(controller: _empIdCtrl, label: 'Employee ID (printer_agent_id)',
+              hint: '002', icon: Icons.badge),
+          _field(controller: _restaurantNameCtrl, label: 'Restaurant Name',
+              hint: 'Hogwarts', icon: Icons.storefront),
           const SizedBox(height: 16),
 
-          // ── Printer ───────────────────────────────────
-          _sectionHeader('🖨️ Printer'),
-
-          // ✅ NEW — Connection type toggle
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: SegmentedButton<PrinterConnectionType>(
-              segments: const [
-                ButtonSegment(
-                  value: PrinterConnectionType.usb,
-                  label: Text('USB'),
-                  icon: Icon(Icons.usb),
-                ),
-                ButtonSegment(
-                  value: PrinterConnectionType.lan,
-                  label: Text('LAN / WiFi'),
-                  icon: Icon(Icons.wifi),
-                ),
-              ],
-              selected: {_connectionType},
-              onSelectionChanged: (v) => setState(() {
-                _connectionType = v.first;
-                _lanTestResult = null; // clear test result on switch
-              }),
+          // ── Printers (dynamic list) ──────────────────────────────────────
+          _sectionHeader('🖨️ Printers'),
+          const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: Text(
+              'Add one printer per physical device. Assign stations (KDS, BAR, PIZZA…) '
+              'and/or enable "Handles Bill" so the router knows where to send each job.',
+              style: TextStyle(color: Colors.grey, fontSize: 12),
             ),
           ),
 
-          // ✅ USB fields — only when USB
-          if (_connectionType == PrinterConnectionType.usb) ...[
-            _field(
-              controller: _printerNameCtrl,
-              label: 'Windows Printer Name',
-              hint: 'Everycom-printer',
-              icon: Icons.print,
-            ),
-          ],
-
-          // ✅ LAN fields — only when LAN
-          if (_connectionType == PrinterConnectionType.lan) ...[
-            _field(
-              controller: _lanIpCtrl,
-              label: 'Printer IP Address',
-              hint: '192.168.1.100',
-              icon: Icons.router,
-              inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-              ],
-            ),
-            _field(
-              controller: _lanPortCtrl,
-              label: 'Port',
-              hint: '9100',
-              icon: Icons.settings_ethernet,
-              numeric: true,
-            ),
-            const SizedBox(height: 4),
-            SizedBox(
+          if (_printers.isEmpty)
+            Container(
               width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _isTestingLan ? null : _testLanConnection,
-                icon: _isTestingLan
-                    ? const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.wifi_find),
-                label: Text(_isTestingLan ? 'Testing...' : 'Test Connection'),
+              padding: const EdgeInsets.all(20),
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey.shade700),
+                borderRadius: BorderRadius.circular(8),
               ),
-            ),
-            if (_lanTestResult != null) ...[
-              const SizedBox(height: 8),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: _lanTestSuccess
-                      ? Colors.green.withOpacity(0.1)
-                      : Colors.red.withOpacity(0.1),
-                  border: Border.all(
-                    color: _lanTestSuccess ? Colors.green : Colors.red,
-                  ),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  _lanTestResult!,
-                  style: TextStyle(
-                    color: _lanTestSuccess ? Colors.green : Colors.red,
-                    fontSize: 12,
-                  ),
-                ),
+              child: const Text(
+                'No printers configured yet. Tap + Add Printer below.',
+                style: TextStyle(color: Colors.grey),
+                textAlign: TextAlign.center,
               ),
-            ],
-            const SizedBox(height: 12),
-          ],
+            )
+          else
+            ..._printers.asMap().entries.map((entry) {
+              final index  = entry.key;
+              final config = entry.value;
+              return _PrinterCard(
+                config:   config,
+                index:    index,
+                onEdit:   () => _showAddPrinterSheet(existing: config, editIndex: index),
+                onDelete: () => _removePrinter(index),
+              );
+            }),
 
-          // ── Paper size (always shown) ─────────────────
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: () => _showAddPrinterSheet(),
+            icon:  const Icon(Icons.add),
+            label: const Text('Add Printer'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size(double.infinity, 48),
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // ── Paper & Copies ───────────────────────────────────────────────
+          _sectionHeader('📄 Paper & Copies'),
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
-            child: DropdownButtonFormField<PaperSize>(
-              value: _paperSize,
+            child: DropdownButtonFormField<bool>(
+              value: _is80mm,
               decoration: const InputDecoration(
-                labelText: 'Paper Size',
+                labelText: 'Paper Size (applied to all printers)',
                 prefixIcon: Icon(Icons.straighten),
                 border: OutlineInputBorder(),
                 filled: true,
               ),
               items: const [
-                DropdownMenuItem(
-                  value: PaperSize.mm58,
-                  child: Text('58mm  —  Small receipt'),
-                ),
-                DropdownMenuItem(
-                  value: PaperSize.mm80,
-                  child: Text('80mm  —  Wide receipt'),
-                ),
+                DropdownMenuItem(value: false, child: Text('58mm — Small receipt')),
+                DropdownMenuItem(value: true,  child: Text('80mm — Wide receipt')),
               ],
-              onChanged: (v) =>
-                  setState(() => _paperSize = v ?? PaperSize.mm58),
+              onChanged: (v) => setState(() => _is80mm = v ?? false),
             ),
           ),
-
-          // ── Copies (always shown) ─────────────────────
-          _field(
-            controller: _billCopiesCtrl,
-            label: 'BILL Copies',
-            hint: '1',
-            icon: Icons.content_copy,
-            numeric: true,
-          ),
-          const SizedBox(height: 12),
-          _field(
-            controller: _kotCopiesCtrl,
-            label: 'KOT Copies',
-            hint: '1',
-            icon: Icons.content_copy,
-            numeric: true,
-          ),
+          _field(controller: _billCopiesCtrl, label: 'Bill Copies',
+              hint: '1', icon: Icons.content_copy, numeric: true),
+          const SizedBox(height: 8),
+          _field(controller: _kotCopiesCtrl, label: 'KOT Copies',
+              hint: '1', icon: Icons.content_copy, numeric: true),
           const SizedBox(height: 16),
 
-          // ── Android USB Printer (unchanged) ──────────
-          if (Platform.isAndroid) ...[
-            _sectionHeader('📱 Android USB Printer'),
-            const Padding(
-              padding: EdgeInsets.only(bottom: 8),
-              child: Text(
-                'Connect your thermal printer via USB OTG cable, then scan.',
-                style: TextStyle(color: Colors.grey, fontSize: 12),
-              ),
+          // ── Windows PDF ─────────────────────────────────────────────────
+          if (Platform.isWindows) ...[
+            _sectionHeader('🪟 Windows Options'),
+            _toggle(
+              label:    'Use PDF Printing on Windows',
+              subtitle: 'Send receipts as PDF via the Windows print spooler',
+              value:    _usePdfPrintingOnWindows,
+              onChanged: (v) => setState(() => _usePdfPrintingOnWindows = v),
             ),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.usb),
-              label: const Text('Scan USB Printers'),
-              onPressed: _scanUsbPrinters,
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size(double.infinity, 48),
-              ),
-            ),
-            const SizedBox(height: 8),
-            if (_foundUsbPrinters.isNotEmpty)
-              DropdownButtonFormField<Printer>(
-                items: _foundUsbPrinters
-                    .map((p) => DropdownMenuItem<Printer>(
-                          value: p,
-                          child: Text('${p.name ?? 'Printer'} — ${p.vendorId}'),
-                        ))
-                    .toList(),
-                onChanged: (Printer? p) {
-                  if (p == null) return;
-                  setState(() => _selectedUsbPrinter = p);
-                  PrintConfig.usbVendorId =
-                      int.tryParse(p.vendorId ?? '0') ?? 0;
-                  PrintConfig.usbProductId =
-                      int.tryParse(p.productId ?? '0') ?? 0;
-                },
-              ),
-            if (PrintConfig.usbVendorId != 0)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  '✅ Saved: vendor=${PrintConfig.usbVendorId} product=${PrintConfig.usbProductId}',
-                  style: const TextStyle(color: Colors.green, fontSize: 12),
-                ),
-              ),
             const SizedBox(height: 16),
           ],
 
-          // ── Auto Print (unchanged) ────────────────────
+          // ── Auto Print ───────────────────────────────────────────────────
           _sectionHeader('⚡ Auto Print'),
           _toggle(
-            label: 'Auto Print KOT',
-            subtitle: 'Print KOT when new order arrives',
-            value: _autoPrint,
+            label:    'Auto Print KOT',
+            subtitle: 'Print KOT automatically when a new order arrives',
+            value:    _autoPrint,
             onChanged: (v) => setState(() => _autoPrint = v),
           ),
           _toggle(
-            label: 'Auto Print Bill',
-            subtitle: 'Print bill on manual_print event',
-            value: _autoPrintBill,
+            label:    'Auto Print Bill',
+            subtitle: 'Print bill on manually_print bill event',
+            value:    _autoPrintBill,
             onChanged: (v) => setState(() => _autoPrintBill = v),
           ),
+          const SizedBox(height: 16),
 
+          // ── Aggregator Auto Print ────────────────────────────────────────
+          _sectionHeader('📦 Aggregator Auto Print'),
+          _toggle(
+            label:    'Aggregator Auto KOT',
+            subtitle: 'Print KOT when aggregator order is Acknowledged',
+            value:    _aggregatorAutoKot,
+            onChanged: (v) => setState(() => _aggregatorAutoKot = v),
+          ),
+          _toggle(
+            label:    'Aggregator Auto Bill',
+            subtitle: 'Print Bill when aggregator order is Acknowledged',
+            value:    _aggregatorAutoBill,
+            onChanged: (v) => setState(() => _aggregatorAutoBill = v),
+          ),
+          const SizedBox(height: 16),
+
+          // ── Bill Display Options ─────────────────────────────────────────
+          _sectionHeader('🗓️ Bill Display Options'),
+          _toggle(
+            label:    'Show Food Item Date on Bill',
+            subtitle: 'Print item ordered date (80mm bill only)',
+            value:    _showItemDateOn80mm,
+            onChanged: (v) => setState(() => _showItemDateOn80mm = v),
+          ),
           const SizedBox(height: 32),
 
-          // ── Save button (unchanged) ───────────────────
+          // ── Save button ──────────────────────────────────────────────────
           SizedBox(
             width: double.infinity,
             height: 48,
             child: ElevatedButton.icon(
-              icon: const Icon(Icons.save),
-              label: const Text('Save & Reconnect',
-                  style: TextStyle(fontSize: 16)),
+              icon:    const Icon(Icons.save),
+              label:   const Text('Save & Reconnect', style: TextStyle(fontSize: 16)),
               onPressed: _save,
               style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
             ),
@@ -1069,19 +374,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  // ── Helpers (all unchanged) ───────────────────────────
-
+  // ── UI helpers ────────────────────────────────────────────────────────────
   Widget _sectionHeader(String title) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Text(
-          title,
-          style: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-            color: Colors.tealAccent,
-          ),
-        ),
-      );
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Text(title, style: const TextStyle(
+      fontSize: 16, fontWeight: FontWeight.bold, color: Colors.tealAccent,
+    )),
+  );
 
   Widget _field({
     required TextEditingController controller,
@@ -1090,55 +389,607 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required IconData icon,
     bool numeric = false,
     List<TextInputFormatter>? inputFormatters,
-  }) =>
-      Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: TextField(
-          controller: controller,
-          keyboardType: numeric ? TextInputType.number : TextInputType.text,
-          inputFormatters: inputFormatters,
-          decoration: InputDecoration(
-            labelText: label,
-            hintText: hint,
-            prefixIcon: Icon(icon),
-            border: const OutlineInputBorder(),
-            filled: true,
-          ),
-        ),
-      );
+  }) => Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: TextField(
+      controller: controller,
+      keyboardType: numeric ? TextInputType.number : TextInputType.text,
+      inputFormatters: inputFormatters,
+      decoration: InputDecoration(
+        labelText: label, hintText: hint,
+        prefixIcon: Icon(icon),
+        border: const OutlineInputBorder(), filled: true,
+      ),
+    ),
+  );
 
   Widget _tokenField() => Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: TextField(
-          controller: _authTokenCtrl,
-          obscureText: _obscureToken,
-          decoration: InputDecoration(
-            labelText: 'Auth Token (Bearer)',
-            hintText: 'FLwtm4SQ2nVv...',
-            prefixIcon: const Icon(Icons.key),
-            border: const OutlineInputBorder(),
-            filled: true,
-            suffixIcon: IconButton(
-              icon:
-                  Icon(_obscureToken ? Icons.visibility : Icons.visibility_off),
-              onPressed: () => setState(() => _obscureToken = !_obscureToken),
-            ),
-          ),
+    padding: const EdgeInsets.only(bottom: 12),
+    child: TextField(
+      controller: _authTokenCtrl,
+      obscureText: _obscureToken,
+      decoration: InputDecoration(
+        labelText: 'Auth Token (Bearer)',
+        hintText: 'paste your token here...',
+        prefixIcon: const Icon(Icons.key),
+        border: const OutlineInputBorder(), filled: true,
+        suffixIcon: IconButton(
+          icon: Icon(_obscureToken ? Icons.visibility : Icons.visibility_off),
+          onPressed: () => setState(() => _obscureToken = !_obscureToken),
         ),
-      );
+      ),
+    ),
+  );
 
   Widget _toggle({
     required String label,
     required String subtitle,
     required bool value,
     required ValueChanged<bool> onChanged,
-  }) =>
-      Card(
-        child: SwitchListTile(
-          title: Text(label),
-          subtitle: Text(subtitle),
-          value: value,
-          onChanged: onChanged,
+  }) => Card(
+    child: SwitchListTile(
+      title: Text(label),
+      subtitle: Text(subtitle),
+      value: value,
+      onChanged: onChanged,
+    ),
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Printer card — shows one configured printer with edit/delete
+// ════════════════════════════════════════════════════════════════════════════
+class _PrinterCard extends StatelessWidget {
+  final PrinterConfig config;
+  final int           index;
+  final VoidCallback  onEdit;
+  final VoidCallback  onDelete;
+
+  const _PrinterCard({
+    required this.config,
+    required this.index,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final connectionDetail = _connectionDetail();
+    final allStations      = [
+      ...config.handledStations,
+      if (config.handlesBill) 'BILL',
+    ];
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: Colors.tealAccent.withOpacity(0.3)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(_typeIcon(config.type), color: Colors.tealAccent, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    config.label,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.edit, size: 18, color: Colors.tealAccent),
+                  tooltip: 'Edit',
+                  onPressed: onEdit,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
+                  tooltip: 'Remove',
+                  onPressed: onDelete,
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '${config.type.name.toUpperCase()}  •  $connectionDetail',
+              style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
+            ),
+            if (allStations.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: allStations.map((s) => Chip(
+                  label: Text(s, style: const TextStyle(fontSize: 11)),
+                  backgroundColor: s == 'BILL'
+                      ? Colors.orange.withOpacity(0.2)
+                      : Colors.teal.withOpacity(0.2),
+                  side: BorderSide(
+                    color: s == 'BILL' ? Colors.orange : Colors.teal,
+                  ),
+                  padding: EdgeInsets.zero,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                )).toList(),
+              ),
+            ] else
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  '⚠️ No stations assigned — this printer will never receive jobs',
+                  style: TextStyle(color: Colors.orange.shade300, fontSize: 11),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _connectionDetail() {
+    switch (config.type) {
+      case PrinterType.lan:
+      case PrinterType.wifi:
+        return '${config.ipAddress ?? '—'}:${config.port}';
+      case PrinterType.bluetooth:
+        return config.macAddress ?? '—';
+      case PrinterType.usb:
+        if (Platform.isWindows) return config.windowsPrinterName ?? '—';
+        return 'vendor=${config.vendorId} product=${config.productId}';
+    }
+  }
+
+  IconData _typeIcon(PrinterType t) {
+    switch (t) {
+      case PrinterType.lan:
+      case PrinterType.wifi:   return Icons.wifi;
+      case PrinterType.bluetooth: return Icons.bluetooth;
+      case PrinterType.usb:    return Icons.usb;
+    }
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Add / Edit printer bottom sheet
+// ════════════════════════════════════════════════════════════════════════════
+class _PrinterFormSheet extends StatefulWidget {
+  final bool          is80mm;
+  final PrinterConfig? initial;
+  final ValueChanged<PrinterConfig> onConfirmed;
+
+  const _PrinterFormSheet({
+    required this.is80mm,
+    required this.onConfirmed,
+    this.initial,
+  });
+
+  @override
+  State<_PrinterFormSheet> createState() => _PrinterFormSheetState();
+}
+
+class _PrinterFormSheetState extends State<_PrinterFormSheet> {
+  final _labelCtrl       = TextEditingController();
+  final _ipCtrl          = TextEditingController();
+  final _portCtrl        = TextEditingController(text: '9100');
+  final _printerNameCtrl = TextEditingController();
+  final _macCtrl         = TextEditingController();
+  final _stationCtrl     = TextEditingController();
+
+  PrinterConnectionType _connType    = PrinterConnectionType.usb;
+  bool                  _handlesBill = false;
+  Set<String>           _stations    = {};
+
+  List<Printer> _foundPrinters = [];
+  Printer?      _selectedPrinter;
+  bool          _scanning      = false;
+  bool          _isTestingLan  = false;
+  String?       _lanTestResult;
+  bool          _lanTestSuccess = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final init = widget.initial;
+    if (init != null) {
+      _labelCtrl.text       = init.label;
+      _handlesBill          = init.handlesBill;
+      _stations             = Set.from(init.handledStations);
+
+      if (init.type == PrinterType.lan || init.type == PrinterType.wifi) {
+        _connType         = PrinterConnectionType.lan;
+        _ipCtrl.text      = init.ipAddress ?? '';
+        _portCtrl.text    = init.port.toString();
+      } else if (init.type == PrinterType.bluetooth) {
+        _connType      = PrinterConnectionType.bluetooth;
+        _macCtrl.text  = init.macAddress ?? '';
+      } else {
+        _connType = PrinterConnectionType.usb;
+        _printerNameCtrl.text = init.windowsPrinterName ?? '';
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _labelCtrl.dispose();
+    _ipCtrl.dispose();
+    _portCtrl.dispose();
+    _printerNameCtrl.dispose();
+    _macCtrl.dispose();
+    _stationCtrl.dispose();
+    super.dispose();
+  }
+
+  void _addStation() {
+    final val = _stationCtrl.text.trim().toUpperCase();
+    if (val.isEmpty) return;
+    setState(() {
+      _stations.add(val);
+      _stationCtrl.clear();
+    });
+  }
+
+  void _removeStation(String s) => setState(() => _stations.remove(s));
+
+  Future<void> _scanPrinters() async {
+    setState(() { _scanning = true; _foundPrinters.clear(); });
+    try {
+      final plugin = FlutterThermalPrinter.instance;
+      final type   = _connType == PrinterConnectionType.bluetooth
+          ? ConnectionType.BLE
+          : ConnectionType.USB;
+      await plugin.getPrinters(connectionTypes: [type]);
+      plugin.devicesStream.listen((list) {
+        if (mounted) setState(() => _foundPrinters = list);
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Scan failed: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      setState(() => _scanning = false);
+    }
+  }
+
+  Future<void> _testLan() async {
+    final ip   = _ipCtrl.text.trim();
+    final port = int.tryParse(_portCtrl.text) ?? 9100;
+    if (ip.isEmpty) return;
+    setState(() { _isTestingLan = true; _lanTestResult = null; });
+    try {
+      final s = await Socket.connect(ip, port, timeout: const Duration(seconds: 3));
+      await s.close();
+      setState(() { _lanTestSuccess = true; _lanTestResult = '✅ Reachable at $ip:$port'; });
+    } catch (_) {
+      setState(() { _lanTestSuccess = false; _lanTestResult = '❌ Cannot reach $ip:$port'; });
+    } finally {
+      setState(() => _isTestingLan = false);
+    }
+  }
+
+  void _confirm() {
+    if (_labelCtrl.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('❌ Printer label is required'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+    if (_stations.isEmpty && !_handlesBill) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('❌ Assign at least one station or enable "Handles Bill"'),
+          backgroundColor: Colors.red,
         ),
       );
+      return;
+    }
+
+    final paperSize = widget.is80mm ? PaperSize.mm80 : PaperSize.mm58;
+    final id        = widget.initial?.id
+        ?? 'printer_${DateTime.now().millisecondsSinceEpoch}';
+
+    PrinterConfig config;
+    switch (_connType) {
+      case PrinterConnectionType.lan:
+        config = PrinterConfig(
+          id: id, label: _labelCtrl.text.trim(),
+          type: PrinterType.lan,
+          ipAddress: _ipCtrl.text.trim(),
+          port: int.tryParse(_portCtrl.text) ?? 9100,
+          paperSize: paperSize,
+          handledStations: _stations, handlesBill: _handlesBill,
+        );
+        break;
+      case PrinterConnectionType.bluetooth:
+        config = PrinterConfig(
+          id: id, label: _labelCtrl.text.trim(),
+          type: PrinterType.bluetooth,
+          macAddress: _macCtrl.text.trim(),
+          paperSize: paperSize,
+          handledStations: _stations, handlesBill: _handlesBill,
+        );
+        break;
+      case PrinterConnectionType.usb:
+        config = PrinterConfig(
+          id: id, label: _labelCtrl.text.trim(),
+          type: PrinterType.usb,
+          windowsPrinterName: _printerNameCtrl.text.trim(),
+          vendorId:  _selectedPrinter != null
+              ? (int.tryParse(_selectedPrinter!.vendorId ?? '0') ?? 0)
+              : widget.initial?.vendorId,
+          productId: _selectedPrinter != null
+              ? (int.tryParse(_selectedPrinter!.productId ?? '0') ?? 0)
+              : widget.initial?.productId,
+          paperSize: paperSize,
+          handledStations: _stations, handlesBill: _handlesBill,
+        );
+        break;
+    }
+
+    widget.onConfirmed(config);
+    Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 20, right: 20, top: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Row(
+              children: [
+                Text(
+                  widget.initial == null ? 'Add Printer' : 'Edit Printer',
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const Spacer(),
+                IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+              ],
+            ),
+            const Divider(),
+            const SizedBox(height: 8),
+
+            // Label
+            TextField(
+              controller: _labelCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Printer Label',
+                hintText: 'e.g. Kitchen, Bar Counter, Billing',
+                prefixIcon: Icon(Icons.label_outline),
+                border: OutlineInputBorder(), filled: true,
+              ),
+            ),
+            const SizedBox(height: 14),
+
+            // Connection type
+            SegmentedButton<PrinterConnectionType>(
+              segments: const [
+                ButtonSegment(value: PrinterConnectionType.usb,       label: Text('USB'),       icon: Icon(Icons.usb)),
+                ButtonSegment(value: PrinterConnectionType.lan,       label: Text('LAN'),       icon: Icon(Icons.wifi)),
+                ButtonSegment(value: PrinterConnectionType.bluetooth, label: Text('Bluetooth'), icon: Icon(Icons.bluetooth)),
+              ],
+              selected: {_connType},
+              onSelectionChanged: (v) => setState(() {
+                _connType = v.first;
+                _foundPrinters.clear();
+                _lanTestResult = null;
+              }),
+            ),
+            const SizedBox(height: 14),
+
+            // ── USB ───────────────────────────────────────────────────────
+            if (_connType == PrinterConnectionType.usb) ...[
+              if (Platform.isWindows) ...[
+                TextField(
+                  controller: _printerNameCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Windows Printer Name',
+                    hintText: 'Everycom-printer',
+                    prefixIcon: Icon(Icons.print),
+                    border: OutlineInputBorder(), filled: true,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Match exactly what appears in Windows Devices & Printers',
+                  style: TextStyle(color: Colors.grey, fontSize: 11),
+                ),
+              ] else ...[
+                ElevatedButton.icon(
+                  onPressed: _scanning ? null : _scanPrinters,
+                  icon: _scanning
+                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.usb),
+                  label: Text(_scanning ? 'Scanning...' : 'Scan USB Printers'),
+                  style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 44)),
+                ),
+                if (_foundPrinters.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<Printer>(
+                    decoration: const InputDecoration(labelText: 'Select Printer',
+                        border: OutlineInputBorder(), filled: true),
+                    items: _foundPrinters.map((p) => DropdownMenuItem<Printer>(
+                      value: p,
+                      child: Text('${p.name ?? 'Printer'} — ${p.vendorId}'),
+                    )).toList(),
+                    onChanged: (p) => setState(() => _selectedPrinter = p),
+                  ),
+                ],
+                if (_selectedPrinter != null) ...[
+                  const SizedBox(height: 6),
+                  Text('✅ vendor=${_selectedPrinter!.vendorId} product=${_selectedPrinter!.productId}',
+                      style: const TextStyle(color: Colors.green, fontSize: 12)),
+                ],
+              ],
+            ],
+
+            // ── LAN ───────────────────────────────────────────────────────
+            if (_connType == PrinterConnectionType.lan) ...[
+              TextField(
+                controller: _ipCtrl,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                decoration: const InputDecoration(
+                  labelText: 'IP Address', hintText: '192.168.1.100',
+                  prefixIcon: Icon(Icons.router),
+                  border: OutlineInputBorder(), filled: true,
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _portCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Port', hintText: '9100',
+                  prefixIcon: Icon(Icons.settings_ethernet),
+                  border: OutlineInputBorder(), filled: true,
+                ),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _isTestingLan ? null : _testLan,
+                icon: _isTestingLan
+                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.wifi_find),
+                label: Text(_isTestingLan ? 'Testing...' : 'Test Connection'),
+                style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 44)),
+              ),
+              if (_lanTestResult != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  _lanTestResult!,
+                  style: TextStyle(color: _lanTestSuccess ? Colors.green : Colors.red, fontSize: 12),
+                ),
+              ],
+            ],
+
+            // ── Bluetooth ─────────────────────────────────────────────────
+            if (_connType == PrinterConnectionType.bluetooth) ...[
+              ElevatedButton.icon(
+                onPressed: _scanning ? null : _scanPrinters,
+                icon: _scanning
+                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.bluetooth_searching),
+                label: Text(_scanning ? 'Scanning...' : 'Scan Bluetooth Printers'),
+                style: ElevatedButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 44),
+                  backgroundColor: Colors.blueAccent,
+                ),
+              ),
+              if (_foundPrinters.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                DropdownButtonFormField<Printer>(
+                  decoration: const InputDecoration(labelText: 'Select Printer',
+                      border: OutlineInputBorder(), filled: true),
+                  items: _foundPrinters.map((p) => DropdownMenuItem<Printer>(
+                    value: p,
+                    child: Text('${p.name ?? 'Unknown'} — ${p.address}'),
+                  )).toList(),
+                  onChanged: (p) {
+                    if (p == null) return;
+                    setState(() {
+                      _selectedPrinter = p;
+                      _macCtrl.text    = p.address ?? '';
+                    });
+                  },
+                ),
+              ],
+              if (_macCtrl.text.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text('✅ MAC: ${_macCtrl.text}',
+                    style: const TextStyle(color: Colors.green, fontSize: 12)),
+              ],
+            ],
+
+            const SizedBox(height: 20),
+            const Divider(),
+            const SizedBox(height: 10),
+
+            // ── Stations ──────────────────────────────────────────────────
+            const Text('Kitchen Stations', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            const Text(
+              'Items whose station field matches one of these will be routed here for KOT printing.',
+              style: TextStyle(color: Colors.grey, fontSize: 11),
+            ),
+            const SizedBox(height: 8),
+
+            if (_stations.isNotEmpty)
+              Wrap(
+                spacing: 6, runSpacing: 4,
+                children: _stations.map((s) => Chip(
+                  label: Text(s),
+                  deleteIcon: const Icon(Icons.close, size: 14),
+                  onDeleted: () => _removeStation(s),
+                  backgroundColor: Colors.teal.withOpacity(0.2),
+                  side: const BorderSide(color: Colors.teal),
+                )).toList(),
+              ),
+
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _stationCtrl,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      labelText: 'Station Name',
+                      hintText: 'KDS / BAR / PIZZA',
+                      border: OutlineInputBorder(), filled: true,
+                      isDense: true,
+                    ),
+                    onSubmitted: (_) => _addStation(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton(
+                  onPressed: _addStation,
+                  style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14)),
+                  child: const Text('Add'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+
+            // ── Handles Bill ──────────────────────────────────────────────
+            Card(
+              child: SwitchListTile(
+                title: const Text('Handles Bill'),
+                subtitle: const Text('Bill print jobs will be routed to this printer'),
+                value: _handlesBill,
+                onChanged: (v) => setState(() => _handlesBill = v),
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // ── Confirm ───────────────────────────────────────────────────
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton.icon(
+                onPressed: _confirm,
+                icon:  const Icon(Icons.check),
+                label: Text(widget.initial == null ? 'Add Printer' : 'Update Printer'),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

@@ -16,6 +16,9 @@ class RestaurantOrder {
   final DateTime receivedAt;
   final String? empCode;
   final String? station;
+  final String? userCustName;
+  final String? userCustPhone;
+  final String dailyToken;
   final Map<String, dynamic> billData;
 
   RestaurantOrder({
@@ -33,6 +36,9 @@ class RestaurantOrder {
     required this.receivedAt,
     this.station,
     this.empCode,
+    this.userCustName,
+    this.userCustPhone,
+    this.dailyToken = '',
     this.billData = const {},
   });
 
@@ -55,12 +61,20 @@ class RestaurantOrder {
     final timeRaw = json['created_at']?.toString().trim() ?? '';
     final receivedAt =
         timeRaw.isNotEmpty ? DateTime.parse(timeRaw).toLocal() : DateTime.now();
+    final user =
+        json['user'] != null ? Map<String, dynamic>.from(json['user']) : null;
+    final custName = user?['f_name']?.toString().trim() ??
+        json['user_name']?.toString().trim() ??
+        '';
+    final custPhone = user?['phone']?.toString().trim() ?? '';
+
+    // print('????????? $custName $custPhone');
 
     return RestaurantOrder(
       orderId: json['id'] ?? 0,
       displayOrderId: json['restaurant_order_id']?.toString() ?? '',
       tableId: json['table_id'] ?? 0,
-      tableName: table?['table_no']?.toString().trim() ?? '' ,
+      tableName: table?['table_no']?.toString().trim() ?? '',
       waiterName: [
         employee['f_name']?.toString() ?? '',
       ].where((s) => s.isNotEmpty).join(' '),
@@ -73,6 +87,9 @@ class RestaurantOrder {
       items: details,
       station: json['station']?.toString(),
       receivedAt: receivedAt,
+      userCustName: custName.isEmpty ? null : custName,
+      userCustPhone: custPhone.isEmpty ? null : custPhone,
+      dailyToken: json['daily_token']?.toString() ?? '',
     );
   }
 
@@ -88,6 +105,8 @@ class RestaurantOrder {
         'printKot': printKot,
         'restaurantName': restaurantName,
         'receivedAt': receivedAt.toIso8601String(),
+        'userCustName': userCustName,
+        'userCustPhone': userCustPhone,
         'items': items
             .map((i) => {
                   'name': i.name,
@@ -96,6 +115,7 @@ class RestaurantOrder {
                   'note': i.note,
                 })
             .toList(),
+        'dailyToken': dailyToken,
       };
 
   factory RestaurantOrder.fromMap(Map<String, dynamic> map) {
@@ -111,6 +131,8 @@ class RestaurantOrder {
       printKot: map['printKot'],
       restaurantName: map['restaurantName'],
       receivedAt: DateTime.parse(map['receivedAt']).toLocal(),
+      userCustName: map['userCustName'],
+      userCustPhone: map['userCustPhone'],
       items: (map['items'] as List)
           .map((i) => OrderItem(
                 name: i['name'],
@@ -119,6 +141,7 @@ class RestaurantOrder {
                 note: i['note'],
               ))
           .toList(),
+      dailyToken: map['dailyToken'] ?? '',
     );
   }
 
@@ -171,6 +194,9 @@ class RestaurantOrder {
       receivedAt: receivedAt,
       items: details,
       billData: bill,
+      dailyToken: data['daily_token']?.toString().trim() ??
+            bill['daily_token']?.toString().trim() ??
+            '',
     );
   }
 
@@ -213,10 +239,9 @@ class RestaurantOrder {
     final tableName = kds['table_name']?.toString().trim() ?? '';
     final printKot = kds['print_kot']?.toString().trim() ?? 'Yes';
 
-    final dateTimeRaw =
-        kds['created_at']?.toString().trim().isNotEmpty == true
-            ? kds['created_at'].toString().trim()
-            : kds['updated_at']?.toString().trim() ?? '';
+    final dateTimeRaw = kds['created_at']?.toString().trim().isNotEmpty == true
+        ? kds['created_at'].toString().trim()
+        : kds['updated_at']?.toString().trim() ?? '';
 
     if (dateTimeRaw.isEmpty) {
       throw Exception('KDS datetime missing in fromTempKdsApi');
@@ -239,9 +264,138 @@ class RestaurantOrder {
       receivedAt: receivedAt,
       items: details,
       billData: bill,
+      dailyToken: data['daily_token']?.toString() ??
+            kds['daily_token']?.toString() ??
+            '',
     );
   }
 
-  static double _sumItems(List<OrderItem> items) =>
-      items.fold(0.0, (sum, i) => sum + (i.price * i.quantity));
+  static double _sumItems(List<OrderItem> items) {
+    return items.fold(0.0, (sum, i) {
+      final basePrice = i.itemUnitPrice > 0 ? i.itemUnitPrice : i.price;
+
+      final unitPrice = basePrice + i.variationTotal + i.addonTotal;
+
+      return sum + (unitPrice * i.quantity);
+    });
+  }
+
+  // ── For aggregator (UrbanPiper) API response ────────────────────────
+  factory RestaurantOrder.fromAggregatorApi(Map<String, dynamic> json) {
+    final ordersRoot = Map<String, dynamic>.from(json['orders'] as Map);
+    final orderInfo  = Map<String, dynamic>.from(ordersRoot['order_details_order'] as Map);
+    final customer   = ordersRoot['customer_details'] != null
+        ? Map<String, dynamic>.from(ordersRoot['customer_details'] as Map)
+        : <String, dynamic>{};
+    final foodList   = (ordersRoot['order_details_food'] as List<dynamic>? ?? []);
+
+    final items = foodList.map((raw) {
+      final detail = Map<String, dynamic>.from(raw as Map);
+      final food   = detail['food_details'] != null
+          ? Map<String, dynamic>.from(detail['food_details'] as Map)
+          : <String, dynamic>{};
+
+      // Add-ons
+      final addOnData = (detail['add_ons'] as List?) ?? const [];
+      final List<String> addons = [];
+      double addonTotal = 0.0;
+      for (final a in addOnData) {
+        final map       = Map<String, dynamic>.from(a as Map);
+        final name      = map['name']?.toString() ?? '';
+        final qty       = int.tryParse(map['quantity']?.toString() ?? '1') ?? 1;
+        final addonPrice = double.tryParse(map['price']?.toString() ?? '0') ?? 0.0;
+        if (name.isNotEmpty) {
+          final total    = addonPrice * qty;
+          final priceStr = total > 0 ? ' (+${total.toStringAsFixed(0)})' : '';
+          addons.add('$name x$qty$priceStr');
+        }
+        addonTotal += addonPrice * qty;
+      }
+
+      return OrderItem(
+        name: food['title']?.toString() ??
+              food['name']?.toString() ??
+              detail['name']?.toString() ??
+              'Unknown Item',
+        quantity: double.tryParse(detail['quantity']?.toString() ?? '1') ?? 1.0,
+        price: double.tryParse(detail['price']?.toString() ??
+                               food['price']?.toString() ?? '0') ?? 0.0,
+        note: detail['food_level_notes']?.toString().isNotEmpty == true
+            ? detail['food_level_notes'].toString()
+            : '',
+        station: detail['station']?.toString() ?? 'KDS',
+        foodStatus: detail['food_status'] is int
+            ? detail['food_status']
+            : int.tryParse(detail['food_status']?.toString() ?? ''),
+        addons: addons,
+        addonTotal: addonTotal,
+        createdAt: detail['created_at'] != null
+            ? DateTime.tryParse(detail['created_at'].toString())?.toLocal()
+            : null,
+      );
+    }).toList();
+
+    final timeRaw   = orderInfo['created_at']?.toString().trim() ?? '';
+    final receivedAt = timeRaw.isNotEmpty
+        ? (DateTime.tryParse(timeRaw)?.toLocal() ?? DateTime.now())
+        : DateTime.now();
+
+    final custName  = customer['name']?.toString().trim() ?? '';
+    final custPhone = customer['phone']?.toString().trim() ?? '';
+
+    final orderAmount = double.tryParse(
+            orderInfo['order_amount']?.toString() ?? '0') ?? 0.0;
+    final itemTotal   = double.tryParse(
+            orderInfo['item_total']?.toString() ?? '0') ?? 0.0;
+    final couponDiscount = double.tryParse(
+            orderInfo['coupon_discount_amount']?.toString() ?? '0') ?? 0.0;
+    final taxAmount   = double.tryParse(
+            orderInfo['total_tax_amount']?.toString() ?? '0') ?? 0.0;
+    final couponCode  = orderInfo['coupon_code']?.toString() ?? '';
+    final platform    = orderInfo['order_plateform']?.toString() ?? 'aggregator';
+
+    // Build a synthetic billData map compatible with the PDF/ESC-POS bill formatter
+    final billData = <String, dynamic>{
+      'order_item_total':    itemTotal,
+      'order_subtotal':      itemTotal,
+      'discount_amount':     couponDiscount,
+      'coupon_code':         couponCode.isNotEmpty ? couponCode : null,
+      'gst_tax':             taxAmount,
+      'vat_tax':             0.0,
+      'service_charge_amount': 0.0,
+      'delivery_charge':     double.tryParse(
+              orderInfo['delivery_charge']?.toString() ?? '0') ?? 0.0,
+      'tip_amount':          double.tryParse(
+              orderInfo['tip_amount']?.toString() ?? '0') ?? 0.0,
+      'grant_amount':        orderAmount,
+      'payment_amount':      orderAmount,
+      'payment_status':      orderInfo['payment_status']?.toString() ?? 'unpaid',
+      'payment_method':      orderInfo['payment_method']?.toString() ?? 'aggregator',
+      'order_type':          orderInfo['order_type']?.toString() ?? 'delivery',
+      'table_name':          platform.toUpperCase(),
+      'waiter_name':         platform[0].toUpperCase() + platform.substring(1),
+      'order_note':          orderInfo['order_note']?.toString() ?? '',
+      'cust_name':           custName,
+      'cust_phone':          custPhone,
+      'daily_token':         '',
+    };
+
+    return RestaurantOrder(
+      orderId:        orderInfo['id'] ?? 0,
+      displayOrderId: orderInfo['restaurant_order_id']?.toString() ?? '',
+      tableId:        orderInfo['table_id'] ?? 0,
+      tableName:      platform.toUpperCase(),
+      waiterName:     platform[0].toUpperCase() + platform.substring(1),
+      orderAmount:    orderAmount,
+      orderNote:      orderInfo['order_note']?.toString() ?? '',
+      orderType:      orderInfo['order_type']?.toString() ?? 'delivery',
+      printKot:       'Yes',
+      restaurantName: PrintConfig.restaurantName,
+      receivedAt:     receivedAt,
+      items:          items,
+      userCustName:   custName.isEmpty ? null : custName,
+      userCustPhone:  custPhone.isEmpty ? null : custPhone,
+      billData:       billData,
+    );
+  }
 }

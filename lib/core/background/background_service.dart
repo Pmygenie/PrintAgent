@@ -5,8 +5,8 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../models/printer_config.dart';
-import '../printer/printer_manager.dart';
-import '../queue/print_queue.dart';
+import '../queue/print_queue_manager.dart';
+import '../router/printer_router.dart';
 import '../models/print_job.dart';
 import '../models/restaurant_order.dart';
 import '../config/print_config.dart';
@@ -59,13 +59,13 @@ void onBackgroundServiceStart(ServiceInstance service) async {
   await PrintConfig.load();
   final configs = await PrinterConfigStorage.load();
 
-  // Setup printer manager + queue
-  final manager = PrinterManager();
-  manager.registerAll(configs.isNotEmpty ? configs : _defaultPrinters());
-  final queue = PrintQueue(manager);
+  // Setup queue manager + router
+  final printers     = configs.isNotEmpty ? configs : _defaultPrinters();
+  final queueManager = PrintQueueManager()..registerAll(printers);
+  final router       = PrinterRouter(printers);
 
   // Forward queue status to UI
-  queue.statusStream.listen((msg) {
+  queueManager.statusStream.listen((msg) {
     service.invoke('queue_update', {'message': msg});
   });
 
@@ -115,35 +115,87 @@ void onBackgroundServiceStart(ServiceInstance service) async {
         service.invoke('log', {'msg': '📨 Event: $eventType'});
 
         if (eventType == 'new-order' && payload.length >= 5) {
-          final wrapper = Map<String, dynamic>.from(payload[4]);
-          final orders  = wrapper['orders'] as List<dynamic>? ?? [];
+          final rawPayload = payload[4] is String
+              ? jsonDecode(payload[4])
+              : payload[4] as Map<String, dynamic>;
+          final orders = rawPayload['orders'] as List<dynamic>? ?? [];
 
           for (final raw in orders) {
             final orderMap = Map<String, dynamic>.from(raw);
             final order    = RestaurantOrder.fromJson(orderMap);
 
-            // Duplicate guard
             if (printedOrderIds.contains(order.orderId)) {
               service.invoke('log', {'msg': '⏭️ Duplicate #${order.displayOrderId}, skip'});
               continue;
             }
 
-            if (order.printKot == 'No') {
-              printedOrderIds.add(order.orderId);
+            if (order.printKot != 'Yes') continue;
 
-              if (PrintConfig.autoPrint) {
-                // AUTO → straight to queue
-                queue.addJob(PrintJob(
+            printedOrderIds.add(order.orderId);
+
+            if (!PrintConfig.autoPrint) {
+              service.invoke('pending_order', order.toMap());
+              service.invoke('log', {'msg': '📋 Pending: #${order.displayOrderId}'});
+              continue;
+            }
+
+            // Route each item's station through the router
+            final agentList = (rawPayload['printer_agent'] as List<dynamic>? ?? [])
+                .cast<Map<String, dynamic>>()
+                .where((a) => a['printer_agent_id']?.toString().trim() == PrintConfig.empId.trim())
+                .toList();
+
+            if (agentList.isEmpty) {
+              // Fallback: no agent list, route all items to any bill-handling printer
+              final printerIds = router.resolveForBill();
+              for (final pid in printerIds) {
+                queueManager.route(PrintJob(
                   type:      PrintType.kot,
-                  printerId: 'kitchen_printer',
+                  printerId: pid,
                   order:     order,
                 ));
-                service.invoke('log', {'msg': '🖨️ Auto printing #${order.displayOrderId}'});
-              } else {
-                // MANUAL → send to UI for staff tap
-                service.invoke('pending_order', order.toMap());
-                service.invoke('log', {'msg': '📋 Pending: #${order.displayOrderId}'});
               }
+              service.invoke('log', {'msg': '🖨️ Auto KOT (fallback) #${order.displayOrderId}'});
+              continue;
+            }
+
+            // Per-station routing
+            for (final agent in agentList) {
+              final station      = agent['station'].toString().toUpperCase().trim();
+              final stationItems = order.items
+                  .where((i) => i.station?.trim().toUpperCase() == station)
+                  .toList();
+
+              if (stationItems.isEmpty) continue;
+
+              final printerIds = router.resolveForStation(station);
+              if (printerIds.isEmpty) continue;
+
+              final stationOrder = RestaurantOrder(
+                orderId:        order.orderId,
+                displayOrderId: order.displayOrderId,
+                tableId:        order.tableId,
+                tableName:      order.tableName,
+                waiterName:     order.waiterName,
+                orderAmount:    stationItems.fold(0.0, (s, i) => s + (i.price * i.quantity)),
+                orderNote:      order.orderNote,
+                orderType:      order.orderType,
+                printKot:       order.printKot,
+                restaurantName: order.restaurantName,
+                receivedAt:     order.receivedAt,
+                dailyToken:     order.dailyToken,
+                items:          stationItems,
+              );
+
+              for (final pid in printerIds) {
+                queueManager.route(PrintJob(
+                  type:         PrintType.kot,
+                  printerId:    pid,
+                  order:        stationOrder,
+                  stationLabel: station,
+                ));
+              }
+              service.invoke('log', {'msg': '🖨️ KOT [$station] → ${printerIds.join(', ')} #${order.displayOrderId}'});
             }
           }
         }
@@ -158,12 +210,15 @@ void onBackgroundServiceStart(ServiceInstance service) async {
   // Listen for manual print trigger from UI
   service.on('manual_print').listen((data) {
     if (data == null) return;
-    final order = RestaurantOrder.fromMap(Map<String, dynamic>.from(data));
-    queue.addJob(PrintJob(
-      type:      PrintType.kot,
-      printerId: 'kitchen_printer',
-      order:     order,
-    ));
+    final order      = RestaurantOrder.fromMap(Map<String, dynamic>.from(data));
+    final printerIds = router.resolveForBill(); // fallback: route to bill printer
+    for (final pid in printerIds) {
+      queueManager.route(PrintJob(
+        type:      PrintType.kot,
+        printerId: pid,
+        order:     order,
+      ));
+    }
     service.invoke('log', {'msg': '🖨️ Manual print #${order.displayOrderId}'});
   });
 
@@ -174,16 +229,19 @@ void onBackgroundServiceStart(ServiceInstance service) async {
   Timer.periodic(const Duration(seconds: 30), (_) {
     service.invoke('heartbeat', {
       'time':  DateTime.now().toIso8601String(),
-      'queue': queue.length,
+      'queue': queueManager.totalLength,
     });
   });
 }
 
 List<PrinterConfig> _defaultPrinters() => [
-  const PrinterConfig(
-    id:        'kitchen_printer',
-    label:     'Kitchen Printer',
-    type:      PrinterType.lan,
-    ipAddress: '192.168.1.100',
+  PrinterConfig(
+    id:              'kitchen_printer',
+    label:           'Kitchen Printer',
+    type:            PrinterType.lan,
+    ipAddress:       PrintConfig.lanIp.isNotEmpty ? PrintConfig.lanIp : '192.168.1.100',
+    port:            PrintConfig.lanPort,
+    handledStations: PrintConfig.stations,
+    handlesBill:     true,
   ),
 ];

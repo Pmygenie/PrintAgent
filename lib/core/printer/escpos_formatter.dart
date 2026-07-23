@@ -176,18 +176,34 @@
 // }
 
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
+import 'package:http/http.dart' as http;
+import 'package:image/image.dart' as img;
 import 'package:printer_agent/core/profile/restaurant_profile_model.dart';
 import 'package:printer_agent/core/profile/restaurant_profile_service.dart';
+import 'package:printer_agent/core/services/print_style_service.dart';
 import '../models/print_job.dart';
 import '../models/restaurant_order.dart';
 import '../config/print_config.dart';
 
 class EscPosFormatter {
   static Future<List<int>> format(PrintJob job) async {
+    final style = await PrintStyleService.getConfig();
     final profile = await CapabilityProfile.load();
-    final generator = Generator(PrintConfig.paperSize, profile);
+    final currentPaperSize =
+        PrintConfig.is80mm ? PaperSize.mm80 : PaperSize.mm58;
+    final generator = Generator(currentPaperSize, profile);
 
     List<int> bytes = [];
+
+    // Left margin via GS L command (203 DPI → 8 dots/mm)
+    final leftDots = (style.marginLeftMm * 8).round();
+    if (leftDots > 0) {
+      bytes += [0x1D, 0x4C, leftDots & 0xFF, (leftDots >> 8) & 0xFF];
+    }
+
+    // Top margin: empty feed lines (standard thermal line ≈ 3.5 mm)
+    final topLines = (style.marginTopMm / 3.5).round();
+    if (topLines > 0) bytes += generator.emptyLines(topLines);
 
     if (job.type == PrintType.kot) {
       bytes += _buildKot(generator, job.order, job.stationLabel);
@@ -195,8 +211,18 @@ class EscPosFormatter {
       bytes += _buildCancelKot(generator, job.order, job.stationLabel);
     } else {
       final restaurantProfile = await RestaurantProfileService.getProfile();
-      bytes += _buildBill(generator, job.order, restaurantProfile);
+      img.Image? logoImage = await _fetchEscLogo(restaurantProfile);
+      // Resize to configured width (203 DPI: 1mm ≈ 8 dots); height auto-scales.
+      if (logoImage != null) {
+        final targetWidthDots = (style.logoWidthMm * 8).round().clamp(50, 400);
+        logoImage = img.copyResize(logoImage, width: targetWidthDots);
+      }
+      bytes += _buildBill(generator, job.order, restaurantProfile, logoImage);
     }
+
+    // Bottom margin
+    final bottomLines = (style.marginBottomMm / 3.5).round();
+    if (bottomLines > 0) bytes += generator.emptyLines(bottomLines);
 
     bytes += generator.cut();
     return bytes;
@@ -206,7 +232,8 @@ class EscPosFormatter {
   // WIDTH CONSTANTS
   // 58mm → 32 chars | 80mm → 42 chars
   // ─────────────────────────────────────────────────────
-  static int get _width => PrintConfig.paperSize == PaperSize.mm80 ? 48 : 32;
+  // static int get _width => PrintConfig.paperSize == PaperSize.mm80 ? 48 : 32;
+  static int get _width => PrintConfig.is80mm ? 48 : 32;
 
   static int get _itemNameBillWidth => _width == 42 ? 24 : 16;
   static int get _itemNameKotWidth => _width == 42 ? 26 : 18;
@@ -239,10 +266,35 @@ class EscPosFormatter {
     return inner.padLeft(_width);
   }
 
+  // ── Logo helpers ─────────────────────────────────────────────────
+  static String _resolveLogoUrl(String path) {
+    if (path.isEmpty) return '';
+    if (path.startsWith('http')) return path;
+    final base = PrintConfig.apiUrl.replaceAll(RegExp(r'/+$'), '');
+    return '$base/$path';
+  }
+
+  static Future<img.Image?> _fetchEscLogo(
+      RestaurantProfileModel profile) async {
+    final rawPath =
+        profile.billLogo.isNotEmpty ? profile.billLogo : profile.restaurantLogo;
+    final url = _resolveLogoUrl(rawPath);
+    if (url.isEmpty) return null;
+    try {
+      final res =
+          await http.get(Uri.parse(url)).timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+        return img.decodeImage(res.bodyBytes);
+      }
+    } catch (_) {}
+    return null;
+  }
+
   static List<int> _buildBill(
     Generator g,
     RestaurantOrder o,
     RestaurantProfileModel profile,
+    img.Image? logoImage,
   ) {
     List<int> b = [];
 
@@ -288,13 +340,11 @@ class EscPosFormatter {
     //   styles: const PosStyles(align: PosAlign.center, bold: true),
     // );
 
-    // Logo placeholder for now
-    // if (restaurantLogo.isNotEmpty) {
-    //   b += g.text(
-    //     '[LOGO]',
-    //     styles: const PosStyles(align: PosAlign.center, bold: true),
-    //   );
-    // }
+    // ── Logo ──
+    if (logoImage != null) {
+      b += g.image(logoImage, align: PosAlign.center);
+      b += g.feed(1);
+    }
 
     b += g.text(
       restaurantName.toUpperCase(),
@@ -397,17 +447,36 @@ class EscPosFormatter {
       }
     }
 
+    if (o.dailyToken.isNotEmpty) {
+      for (final row in _buildWrapped3ColRow(
+        '',
+        'Token No: ${o.dailyToken}',
+        '',
+      )) {
+        b += g.text(
+          row,
+          styles: const PosStyles(
+            bold: true,
+            align: PosAlign.center,
+          ),
+        );
+      }
+    }
+
     b += g.text(lineDashes,
         styles: const PosStyles(align: PosAlign.center, bold: true));
     // ── Table Header ──  full width columns
+    final bool show80mmDate = PrintConfig.is80mm && PrintConfig.showItemDateOn80mm;
     final int amtWidth = _width == 42 ? 10 : 8;
     final int qtyWidth = _width == 42 ? 7 : 6;
-    final int itemWidth = _width - qtyWidth - amtWidth; // fills remaining
+    final int dateWidth = show80mmDate ? 6 : 0; // "9-Jul" = 5 chars + 1 pad
+    final int itemWidth = _width - qtyWidth - amtWidth - dateWidth;
 
     b += g.text(
       _padR('ITEM', itemWidth) +
-          _padR('QTY', qtyWidth) +
-          _padL('AMT', amtWidth),
+          _padC('QTY', qtyWidth) +
+          _padL('AMT', amtWidth) +
+          (show80mmDate ? _padL('DATE', dateWidth) : ''),
       styles: const PosStyles(bold: true, align: PosAlign.center),
     );
     b += g.text(lineDashes,
@@ -415,11 +484,21 @@ class EscPosFormatter {
 
     // ── Items loop ── complementary + variations + add-ons
     for (final item in o.items) {
-      final unitPrice = item.price + item.variationTotal + item.addonTotal;
+      final double unitPrice =
+          (item.itemUnit.isNotEmpty && item.itemUnitPrice > 0
+                  ? item.itemUnitPrice
+                  : item.price) +
+              item.variationTotal +
+              item.addonTotal;
+
       final amt = unitPrice * item.quantity;
 
       final isComp = item.complementary?.toString().toLowerCase() == 'yes';
       final isCancelled = item.foodStatus == 3;
+
+      final qtyDisplay = item.itemUnit.isNotEmpty
+          ? '${_formatQty(item.quantity)}${item.itemUnit}'
+          : _formatQty(item.quantity);
 
       final displayName = isComp ? '${item.name} (Comp)' : item.name;
       final cancelledName =
@@ -427,10 +506,13 @@ class EscPosFormatter {
 
       final itemNameLines = _wrapText(cancelledName, itemWidth);
 
+      final dateStr = show80mmDate ? _escItemDate(item.createdAt) : '';
+
       b += g.text(
         _padR(itemNameLines.first, itemWidth) +
-            _padC('${item.quantity}', qtyWidth) +
-            _padL(amt.toStringAsFixed(0), amtWidth),
+            _padC(qtyDisplay, qtyWidth) +
+            _padL(_formatMoney(amt), amtWidth) +
+            (show80mmDate ? _padL(dateStr, dateWidth) : ''),
         styles: const PosStyles(bold: false, align: PosAlign.left),
       );
 
@@ -711,6 +793,11 @@ class EscPosFormatter {
     // ── Footer ───────────────────────────────────────────
     b += g.text(lineEquals,
         styles: const PosStyles(align: PosAlign.center, bold: true));
+    if (profile.footerText.isNotEmpty)
+      b += g.text(
+        profile.footerText,
+        styles: const PosStyles(align: PosAlign.center),
+      );
     b += g.text(
       'Powered by MyGenie',
       styles: const PosStyles(align: PosAlign.center, bold: true),
@@ -741,6 +828,9 @@ class EscPosFormatter {
     final waiterLine = o.waiterName.length > _width
         ? _truncate(o.waiterName, _width - 9)
         : o.waiterName;
+
+    final safeCustomerName = (o.userCustName ?? '').trim();
+    final safeCustomerPhone = (o.userCustPhone ?? '').trim();
 
     for (final line in _wrapTitle(title)) {
       b += g.text(
@@ -800,6 +890,32 @@ class EscPosFormatter {
       }
     }
 
+    if (safeCustomerName.isNotEmpty || safeCustomerPhone.isNotEmpty) {
+      for (final row in _buildWrapped3ColRow(
+        safeCustomerName,
+        '',
+        safeCustomerPhone,
+      )) {
+        b += g.text(
+          row,
+          styles: const PosStyles(
+            bold: true,
+            align: PosAlign.center,
+          ),
+        );
+      }
+    }
+
+    if (o.dailyToken.isNotEmpty) {
+      for (final row in _buildWrapped3ColRow(
+        '',
+        'Token No: ${o.dailyToken}',
+        '',
+      )) {
+        b += g.text(row, styles: const PosStyles(bold: true, align: PosAlign.center));
+      }
+    }
+
     b += g.text(
       lineDash,
       styles: const PosStyles(align: PosAlign.center, bold: true),
@@ -824,7 +940,10 @@ class EscPosFormatter {
       }
 
       final sr = '${srNo++}.';
-      final qty = '${item.quantity}  ';
+      final qtyString = item.itemUnit.isNotEmpty
+          ? '${_formatQty(item.quantity)}${item.itemUnit}'
+          : _formatQty(item.quantity);
+      final qty = '$qtyString  ';
       final itemNameLines = _wrapText(item.name.trim(), itemWidth);
 
       b += g.text(
@@ -941,6 +1060,9 @@ class EscPosFormatter {
         ? _truncate(o.waiterName, _width - 9)
         : o.waiterName;
 
+    final safeCustomerName = (o.userCustName ?? '').trim();
+    final safeCustomerPhone = (o.userCustPhone ?? '').trim();
+
     for (final line in _wrapTitle(title)) {
       b += g.text(
         line,
@@ -999,6 +1121,32 @@ class EscPosFormatter {
       }
     }
 
+    if (safeCustomerName.isNotEmpty || safeCustomerPhone.isNotEmpty) {
+      for (final row in _buildWrapped3ColRow(
+        safeCustomerName,
+        '',
+        safeCustomerPhone,
+      )) {
+        b += g.text(
+          row,
+          styles: const PosStyles(
+            bold: true,
+            align: PosAlign.center,
+          ),
+        );
+      }
+    }
+
+    if (o.dailyToken.isNotEmpty) {
+      for (final row in _buildWrapped3ColRow(
+        '',
+        'Token No: ${o.dailyToken}',
+        '',
+      )) {
+        b += g.text(row, styles: const PosStyles(bold: true, align: PosAlign.center));
+      }
+    }
+
     b += g.text(
       lineDash,
       styles: const PosStyles(align: PosAlign.center, bold: true),
@@ -1020,7 +1168,10 @@ class EscPosFormatter {
 
     for (final item in o.items) {
       final sr = '${srNo++}.';
-      final qty = '${item.quantity}  ';
+      final qtyString = item.itemUnit.isNotEmpty
+          ? '${_formatQty(item.quantity)}${item.itemUnit}'
+          : _formatQty(item.quantity);
+      final qty = '${qtyString}  ';
       final itemNameLines = _wrapText(item.name.trim(), itemWidth);
 
       b += g.text(
@@ -1116,6 +1267,18 @@ class EscPosFormatter {
       '${dt.hour.toString().padLeft(2, '0')}:'
       '${dt.minute.toString().padLeft(2, '0')}';
 
+  static String _formatQty(double qty) =>
+      qty == qty.truncateToDouble() ? qty.toInt().toString() : qty.toString();
+
+  /// 1 → "1", 0.6 → "0.6", 1.50 → "1.5" (no trailing zeros).
+  static String _formatMoney(double value) {
+    if (value == value.roundToDouble()) return value.toStringAsFixed(0);
+    return value
+        .toStringAsFixed(2)
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
+  }
+
   static String _formatTime(DateTime dt) =>
       '${dt.hour.toString().padLeft(2, '0')}:'
       '${dt.minute.toString().padLeft(2, '0')}';
@@ -1123,6 +1286,16 @@ class EscPosFormatter {
   static String _padL(String text, int width) {
     if (text.length >= width) return text.substring(0, width);
     return text.padLeft(width);
+  }
+
+// Date formatter for 80mm bill DATE column — returns "9-Jul" style
+  static const _escMonths = [
+    'Jan','Feb','Mar','Apr','May','Jun',
+    'Jul','Aug','Sep','Oct','Nov','Dec',
+  ];
+  static String _escItemDate(DateTime? dt) {
+    if (dt == null) return '-';
+    return '${dt.day}-${_escMonths[dt.month - 1]}';
   }
 
 // Right-pad (left aligned) — for ITEM NAME
