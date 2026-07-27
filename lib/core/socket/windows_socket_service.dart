@@ -15,15 +15,16 @@ class WindowsSocketService {
   final PrintQueueManager _queueManager;
   final PrinterRouter _router;
   final Set<int> _printedIds = {};
+  final Set<int> _cancelledPrintedIds = {};
 
   bool _connected = false;
   bool get isConnected => _connected;
 
-  final _logController    = StreamController<String>.broadcast();
+  final _logController = StreamController<String>.broadcast();
   final _statusController = StreamController<bool>.broadcast();
 
-  Stream<String> get logStream    => _logController.stream;
-  Stream<bool>   get statusStream => _statusController.stream;
+  Stream<String> get logStream => _logController.stream;
+  Stream<bool> get statusStream => _statusController.stream;
 
   WindowsSocketService(this._queueManager, this._router);
 
@@ -85,7 +86,7 @@ class WindowsSocketService {
         return {
           ...Map<String, dynamic>.from(details),
           'bill': billData,
-          'kds':  kdsData,
+          'kds': kdsData,
         };
       } catch (e) {
         _log('❌ fetchOrderRaw error (attempt $attempt): $e');
@@ -102,25 +103,30 @@ class WindowsSocketService {
 
     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        _log('🌐 Aggregator fetch (attempt $attempt/$maxAttempts) orderId=$orderId');
+        _log(
+            '🌐 Aggregator fetch (attempt $attempt/$maxAttempts) orderId=$orderId');
 
-        final response = await http.post(
-          Uri.parse(url),
-          headers: {
-            'Content-Type': 'application/json; charset=UTF-8',
-            'X-localization': 'en',
-            'Authorization': 'Bearer ${PrintConfig.authToken}',
-          },
-          body: jsonEncode({'order_id': int.tryParse(orderId) ?? orderId}),
-        ).timeout(const Duration(seconds: 5));
+        final response = await http
+            .post(
+              Uri.parse(url),
+              headers: {
+                'Content-Type': 'application/json; charset=UTF-8',
+                'X-localization': 'en',
+                'Authorization': 'Bearer ${PrintConfig.authToken}',
+              },
+              body: jsonEncode({'order_id': int.tryParse(orderId) ?? orderId}),
+            )
+            .timeout(const Duration(seconds: 5));
 
         if (response.statusCode != 200) {
-          _log('❌ Aggregator API error: ${response.statusCode} (attempt $attempt)');
+          _log(
+              '❌ Aggregator API error: ${response.statusCode} (attempt $attempt)');
           if (attempt < maxAttempts) continue;
           return null;
         }
 
         final json = jsonDecode(response.body) as Map<String, dynamic>;
+        print('=====> Aggregator $orderId response: $json');
 
         if (json['orders'] == null) {
           _log('❌ Aggregator response missing "orders" key (attempt $attempt)');
@@ -140,10 +146,10 @@ class WindowsSocketService {
 
   void connect() {
     _socket = IO.io(PrintConfig.serverUrl, <String, dynamic>{
-      'transports':           ['websocket'],
-      'autoConnect':          false,
-      'reconnection':         true,
-      'reconnectionDelay':    2000,
+      'transports': ['websocket'],
+      'autoConnect': false,
+      'reconnection': true,
+      'reconnectionDelay': 2000,
       'reconnectionAttempts': 999999,
     });
 
@@ -151,7 +157,17 @@ class WindowsSocketService {
       _connected = true;
       _statusController.add(true);
       _log('✅ Connected to ${PrintConfig.serverUrl}');
+
+      // Join restaurant room on every connect/reconnect.
+      _socket!.emit('join_restaurant', {
+        'restaurant_id': PrintConfig.restaurantId,
+      });
+
       _registerListeners();
+    });
+
+    _socket!.on('joined_restaurant', (data) {
+      _log('🏠 Joined room: ${data['room']}');
     });
 
     _socket!.onDisconnect((_) {
@@ -162,7 +178,7 @@ class WindowsSocketService {
 
     _socket!.onReconnect((_) {
       _log('♻️ Reconnected — re-registering listeners');
-      _registerListeners();
+      // _registerListeners();
     });
 
     _socket!.onError((e) => _log('⚠️ Socket error: $e'));
@@ -179,7 +195,7 @@ class WindowsSocketService {
     _socket!.on('new_order_$restaurantId', (data) {
       log('📡 Received new_order_$restaurantId : $data');
       try {
-        final payload   = data as List<dynamic>;
+        final payload = data as List<dynamic>;
         final eventType = payload[0].toString();
 
         // ── GATE 1: Event type check ──────────────────────────────────
@@ -219,9 +235,138 @@ class WindowsSocketService {
 
         _printedIds.add(order.orderId);
 
+        // ── scan-new-order: bypass printer_agent, use Scan Order Auto Print toggle ──
+        if (eventType == 'scan-new-order') {
+          if (!PrintConfig.scanOrderAutoPrint) {
+            _log(
+                '⏸️ Scan Order Auto Print OFF — skip #${order.displayOrderId}');
+            return;
+          }
+
+          final stationGroups = <String, List<OrderItem>>{};
+          for (final item in order.items) {
+            final st = item.station?.trim().toUpperCase() ?? 'KDS';
+            stationGroups.putIfAbsent(st, () => []).add(item);
+          }
+
+          for (final station in stationGroups.keys) {
+            final stationItems = stationGroups[station]!;
+            final printerIds = _router.resolveForStation(station);
+            if (printerIds.isEmpty) {
+              _log('⚠️ No printer configured for station=$station');
+              continue;
+            }
+
+            final stationOrder = RestaurantOrder(
+              orderId: order.orderId,
+              displayOrderId: order.displayOrderId,
+              tableId: order.tableId,
+              tableName: order.tableName,
+              waiterName: order.waiterName,
+              orderAmount: stationItems.fold(
+                  0.0, (sum, i) => sum + (i.price * i.quantity)),
+              orderNote: order.orderNote,
+              orderType: order.orderType,
+              printKot: order.printKot,
+              restaurantName: order.restaurantName,
+              receivedAt: order.receivedAt,
+              userCustName: order.userCustName,
+              userCustPhone: order.userCustPhone,
+              dailyToken: order.dailyToken,
+              items: stationItems,
+            );
+
+            for (final printerId in printerIds) {
+              _queueManager.route(PrintJob(
+                type: PrintType.kot,
+                printerId: printerId,
+                order: stationOrder,
+                stationLabel: station,
+              ));
+            }
+            _log(
+                '🖨️ Scan KOT [$station] → ${printerIds.join(', ')} (${stationItems.length} items) #${order.displayOrderId}');
+          }
+          return;
+        }
+
+        // ── update-order from web: bypass printer_agent, use Scan Order Auto Print ──
+        final isWebSource =
+            payload.length > 5 && payload[5].toString().trim() == 'web';
+        if (eventType == 'update-order' && isWebSource) {
+          if (!PrintConfig.scanOrderAutoPrint) {
+            _log(
+                '⏸️ Scan Order Auto Print OFF — skip web update-order #${order.displayOrderId}');
+            return;
+          }
+
+          final newlyAdded = rawPayload is Map
+              ? rawPayload['newly_added_items'] as List<dynamic>?
+              : null;
+          if (newlyAdded == null || newlyAdded.isEmpty) {
+            _log(
+                '⏩ web update-order but no newly_added_items — skip #${order.displayOrderId}');
+            return;
+          }
+
+          final itemsToPrint = newlyAdded
+              .cast<Map<String, dynamic>>()
+              .map((e) => OrderItem.fromJson(e))
+              .toList();
+          _log(
+              '📦 web update-order: ${itemsToPrint.length} newly added items #${order.displayOrderId}');
+
+          final stationGroups = <String, List<OrderItem>>{};
+          for (final item in itemsToPrint) {
+            final st = item.station?.trim().toUpperCase() ?? 'KDS';
+            stationGroups.putIfAbsent(st, () => []).add(item);
+          }
+
+          for (final station in stationGroups.keys) {
+            final stationItems = stationGroups[station]!;
+            final printerIds = _router.resolveForStation(station);
+            if (printerIds.isEmpty) {
+              _log('⚠️ No printer configured for station=$station');
+              continue;
+            }
+
+            final stationOrder = RestaurantOrder(
+              orderId: order.orderId,
+              displayOrderId: order.displayOrderId,
+              tableId: order.tableId,
+              tableName: order.tableName,
+              waiterName: order.waiterName,
+              orderAmount: stationItems.fold(
+                  0.0, (sum, i) => sum + (i.price * i.quantity)),
+              orderNote: order.orderNote,
+              orderType: order.orderType,
+              printKot: order.printKot,
+              restaurantName: order.restaurantName,
+              receivedAt: order.receivedAt,
+              userCustName: order.userCustName,
+              userCustPhone: order.userCustPhone,
+              dailyToken: order.dailyToken,
+              items: stationItems,
+            );
+
+            for (final printerId in printerIds) {
+              _queueManager.route(PrintJob(
+                type: PrintType.kot,
+                printerId: printerId,
+                order: stationOrder,
+                stationLabel: station,
+              ));
+            }
+            _log(
+                '🖨️ Web update KOT [$station] → ${printerIds.join(', ')} (${stationItems.length} items) #${order.displayOrderId}');
+          }
+          return;
+        }
+
         // ── GATE 5: printer_agent array ───────────────────────────────
         final agentList = ((rawPayload as Map<String, dynamic>)['printer_agent']
-                as List<dynamic>? ?? []);
+                as List<dynamic>? ??
+            []);
 
         if (agentList.isEmpty) {
           _log('⏩ printer_agent missing — skip #${order.displayOrderId}');
@@ -231,25 +376,28 @@ class WindowsSocketService {
         _log('📋 printer_agent count: ${agentList.length}');
 
         // ── GATE 6: Filter agents for this device ─────────────────────
-        final myEmpId  = PrintConfig.empId.trim();
+        final myEmpId = PrintConfig.empId.trim();
         final myAgents = agentList
             .cast<Map<String, dynamic>>()
             .where((a) => a['printer_agent_id']?.toString().trim() == myEmpId)
             .toList();
 
         if (myAgents.isEmpty) {
-          _log('⏩ No agents for empId=$myEmpId — skip #${order.displayOrderId}');
+          _log(
+              '⏩ No agents for empId=$myEmpId — skip #${order.displayOrderId}');
           return;
         }
 
-        _log('✅ Matched agents: ${myAgents.map((a) => a['station']).toList()} for empId=$myEmpId');
+        _log(
+            '✅ Matched agents: ${myAgents.map((a) => a['station']).toList()} for empId=$myEmpId');
 
         // ── Resolve items to print ────────────────────────────────────
         final List<OrderItem> itemsToPrint;
         if (eventType == 'update-order') {
           final newlyAdded = rawPayload['newly_added_items'] as List<dynamic>?;
           if (newlyAdded == null || newlyAdded.isEmpty) {
-            _log('⏩ update-order but no newly_added_items — skip #${order.displayOrderId}');
+            _log(
+                '⏩ update-order but no newly_added_items — skip #${order.displayOrderId}');
             return;
           }
           itemsToPrint = newlyAdded
@@ -290,21 +438,22 @@ class WindowsSocketService {
           if (printerIds.isEmpty) continue; // warning already logged by router
 
           final stationOrder = RestaurantOrder(
-            orderId:        order.orderId,
+            orderId: order.orderId,
             displayOrderId: order.displayOrderId,
-            tableId:        order.tableId,
-            tableName:      order.tableName,
-            waiterName:     order.waiterName,
-            orderAmount:    stationItems.fold(0.0, (sum, i) => sum + (i.price * i.quantity)),
-            orderNote:      order.orderNote,
-            orderType:      order.orderType,
-            printKot:       order.printKot,
+            tableId: order.tableId,
+            tableName: order.tableName,
+            waiterName: order.waiterName,
+            orderAmount: stationItems.fold(
+                0.0, (sum, i) => sum + (i.price * i.quantity)),
+            orderNote: order.orderNote,
+            orderType: order.orderType,
+            printKot: order.printKot,
             restaurantName: order.restaurantName,
-            receivedAt:     order.receivedAt,
-            userCustName:   order.userCustName,
-            userCustPhone:  order.userCustPhone,
-            dailyToken:     order.dailyToken,
-            items:          stationItems,
+            receivedAt: order.receivedAt,
+            userCustName: order.userCustName,
+            userCustPhone: order.userCustPhone,
+            dailyToken: order.dailyToken,
+            items: stationItems,
           );
 
           final jobType = eventType == 'update-order-status'
@@ -313,15 +462,18 @@ class WindowsSocketService {
 
           for (final printerId in printerIds) {
             _queueManager.route(PrintJob(
-              type:         jobType,
-              printerId:    printerId,
-              order:        stationOrder,
+              type: jobType,
+              printerId: printerId,
+              order: stationOrder,
               stationLabel: station,
             ));
           }
 
-          final label = jobType == PrintType.cancelKot ? '🚫 Queued CANCEL KOT' : '🖨️ Queued KOT';
-          _log('$label [$station] → ${printerIds.join(', ')} (${stationItems.length} items) #${order.displayOrderId}');
+          final label = jobType == PrintType.cancelKot
+              ? '🚫 Queued CANCEL KOT'
+              : '🖨️ Queued KOT';
+          _log(
+              '$label [$station] → ${printerIds.join(', ')} (${stationItems.length} items) #${order.displayOrderId}');
         }
       } catch (e) {
         _log('❌ new_order parse error: $e');
@@ -335,10 +487,10 @@ class WindowsSocketService {
     _socket!.on('manually_print_$restaurantId', (data) async {
       _log('📡 Received manually_print_$restaurantId : $data');
       try {
-        final payload       = data as List<dynamic>;
-        final printType     = payload[0].toString().toLowerCase();
-        final orderId       = payload[1].toString();
-        final socketRestId  = payload[2].toString();
+        final payload = data as List<dynamic>;
+        final printType = payload[0].toString().toLowerCase();
+        final orderId = payload[1].toString();
+        final socketRestId = payload[2].toString();
 
         // ── GATE 1: Restaurant check ──────────────────────────────────
         if (socketRestId != restaurantId) return;
@@ -361,14 +513,15 @@ class WindowsSocketService {
           // Verify this device has a BILL station in printer_agent
           final agentList = (rawData['printer_agent'] as List<dynamic>? ?? []);
           final billAgent = agentList.cast<Map<String, dynamic>>().firstWhere(
-            (a) =>
-                a['printer_agent_id']?.toString() == PrintConfig.empId &&
-                a['station']?.toString().toUpperCase() == 'BILL',
-            orElse: () => {},
-          );
+                (a) =>
+                    a['printer_agent_id']?.toString() == PrintConfig.empId &&
+                    a['station']?.toString().toUpperCase() == 'BILL',
+                orElse: () => {},
+              );
 
           if (billAgent.isEmpty) {
-            _log('⏩ No BILL agent for empId=${PrintConfig.empId} — not my bill, skip');
+            _log(
+                '⏩ No BILL agent for empId=${PrintConfig.empId} — not my bill, skip');
             return;
           }
 
@@ -382,9 +535,9 @@ class WindowsSocketService {
 
           for (final printerId in printerIds) {
             _queueManager.route(PrintJob(
-              type:      PrintType.bill,
+              type: PrintType.bill,
               printerId: printerId,
-              order:     order,
+              order: order,
             ));
           }
           _log('🧾 Manual Bill queued → ${printerIds.join(', ')} #$orderId');
@@ -401,7 +554,8 @@ class WindowsSocketService {
             return;
           }
 
-          final socketStationsRaw = payload.length > 3 ? payload[3].toString() : '';
+          final socketStationsRaw =
+              payload.length > 3 ? payload[3].toString() : '';
           final socketStations = socketStationsRaw
               .split(',')
               .map((s) => s.trim().toUpperCase())
@@ -411,16 +565,18 @@ class WindowsSocketService {
           _log('📋 Socket stations from event: $socketStations');
 
           final agentList = (rawData['printer_agent'] as List<dynamic>? ?? []);
-          final myAgents  = agentList
+          final myAgents = agentList
               .cast<Map<String, dynamic>>()
               .where((a) =>
                   a['printer_agent_id']?.toString() == PrintConfig.empId &&
                   a['station']?.toString().toUpperCase() != 'BILL' &&
-                  socketStations.contains(a['station']?.toString().toUpperCase()))
+                  socketStations
+                      .contains(a['station']?.toString().toUpperCase()))
               .toList();
 
           if (myAgents.isEmpty) {
-            _log('⏩ No matching KOT agents for empId=${PrintConfig.empId} — skip');
+            _log(
+                '⏩ No matching KOT agents for empId=${PrintConfig.empId} — skip');
             return;
           }
 
@@ -445,14 +601,15 @@ class WindowsSocketService {
 
             for (final printerId in printerIds) {
               _queueManager.route(PrintJob(
-                type:         PrintType.kot,
-                printerId:    printerId,
-                order:        stationOrder,
+                type: PrintType.kot,
+                printerId: printerId,
+                order: stationOrder,
                 stationLabel: station,
               ));
             }
 
-            _log('🖨️ KOT queued [$station] → ${printerIds.join(', ')} (${stationOrder.items.length} items) #$orderId');
+            _log(
+                '🖨️ KOT queued [$station] → ${printerIds.join(', ')} (${stationOrder.items.length} items) #$orderId');
           }
         }
       } catch (e) {
@@ -470,11 +627,11 @@ class WindowsSocketService {
     _socket!.on('aggregator_order_$restaurantId', (data) async {
       _log('📡 Received aggregator_order_$restaurantId : $data');
       try {
-        final payload    = data as List<dynamic>;
-        final eventType  = payload[0].toString();
-        final orderId    = payload[1].toString();
+        final payload = data as List<dynamic>;
+        final eventType = payload[0].toString();
+        final orderId = payload[1].toString();
         final socketRestId = payload[2].toString();
-        final status     = payload.length > 3 ? payload[3].toString() : '';
+        final status = payload.length > 3 ? payload[3].toString() : '';
 
         // ── GATE 1: Event type ────────────────────────────────────────
         if (eventType != 'aggrigator-order-update') return;
@@ -482,11 +639,67 @@ class WindowsSocketService {
         // ── GATE 2: Restaurant check ──────────────────────────────────
         if (socketRestId != restaurantId) return;
 
-        // ── GATE 3: Only on Acknowledged ─────────────────────────────
-        if (status != 'Acknowledged') {
-          _log('⏩ Aggregator status=$status — only print on Acknowledged, skip');
+        // ── GATE 3: Acknowledged (KOT/Bill) or Cancelled (Cancel KOT) ─
+        if (status != 'Acknowledged' && status != 'Cancelled') {
+          _log(
+              '⏩ Aggregator status=$status — skip (only Acknowledged / Cancelled)');
           return;
         }
+
+        final orderIdInt = int.tryParse(orderId) ?? 0;
+
+        // ═══════════════════════════════════════════════════════════════
+        // CANCELLED → Cancel KOT (gated by Aggregator Auto KOT)
+        // ═══════════════════════════════════════════════════════════════
+        if (status == 'Cancelled') {
+          if (!PrintConfig.aggregatorAutoKot) {
+            _log('⏸️ Aggregator Auto KOT OFF — skip cancel #$orderId');
+            return;
+          }
+
+          if (_cancelledPrintedIds.contains(orderIdInt)) {
+            _log(
+                '⏩ Aggregator cancel #$orderId already printed — skip duplicate');
+            return;
+          }
+
+          _log('🌐 Fetching aggregator order #$orderId (cancel)...');
+          final rawJson = await _fetchAggregatorOrder(orderId);
+          if (rawJson == null) {
+            _log('❌ Could not fetch aggregator order #$orderId');
+            return;
+          }
+
+          // GATE: f_order_status must be 3
+          final ordersRoot = rawJson['orders'];
+          final orderInfo =
+              ordersRoot is Map ? ordersRoot['order_details_order'] : null;
+          final fOrderStatus = orderInfo is Map
+              ? (orderInfo['f_order_status'] is int
+                  ? orderInfo['f_order_status'] as int
+                  : int.tryParse(orderInfo['f_order_status']?.toString() ?? ''))
+              : null;
+          if (fOrderStatus != 3) {
+            _log(
+                '⏩ Aggregator cancel #$orderId f_order_status=$fOrderStatus — skip (need 3)');
+            return;
+          }
+
+          _cancelledPrintedIds.add(orderIdInt);
+
+          final order = RestaurantOrder.fromAggregatorApi(rawJson);
+          _queueAggregatorStationJobs(
+            order,
+            orderId,
+            jobType: PrintType.cancelKot,
+            logLabel: '🚫 Aggregator CANCEL KOT',
+          );
+          return;
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // ACKNOWLEDGED → KOT / Bill (existing behaviour)
+        // ═══════════════════════════════════════════════════════════════
 
         // ── GATE 4: At least one toggle ON ────────────────────────────
         if (!PrintConfig.aggregatorAutoKot && !PrintConfig.aggregatorAutoBill) {
@@ -495,7 +708,6 @@ class WindowsSocketService {
         }
 
         // ── GATE 5: Deduplication ─────────────────────────────────────
-        final orderIdInt = int.tryParse(orderId) ?? 0;
         if (_printedIds.contains(orderIdInt)) {
           _log('⏩ Aggregator order #$orderId already printed — skip duplicate');
           return;
@@ -512,68 +724,17 @@ class WindowsSocketService {
 
         final order = RestaurantOrder.fromAggregatorApi(rawJson);
 
-        // ── KOT ───────────────────────────────────────────────────────
         if (PrintConfig.aggregatorAutoKot) {
-          // Group items by station
-          final stationGroups = <String, List<OrderItem>>{};
-          for (final item in order.items) {
-            final st = item.station?.trim().toUpperCase() ?? 'KDS';
-            stationGroups.putIfAbsent(st, () => []).add(item);
-          }
-
-          for (final station in stationGroups.keys) {
-            final stationItems = stationGroups[station]!;
-            final printerIds   = _router.resolveForStation(station);
-            if (printerIds.isEmpty) {
-              _log('⚠️ No printer configured for station=$station');
-              continue;
-            }
-
-            final stationOrder = RestaurantOrder(
-              orderId:        order.orderId,
-              displayOrderId: order.displayOrderId,
-              tableId:        order.tableId,
-              tableName:      order.tableName,
-              waiterName:     order.waiterName,
-              orderAmount:    stationItems.fold(0.0, (s, i) => s + i.price * i.quantity),
-              orderNote:      order.orderNote,
-              orderType:      order.orderType,
-              printKot:       'Yes',
-              restaurantName: order.restaurantName,
-              receivedAt:     order.receivedAt,
-              userCustName:   order.userCustName,
-              userCustPhone:  order.userCustPhone,
-              dailyToken:     order.dailyToken,
-              items:          stationItems,
-            );
-
-            for (final printerId in printerIds) {
-              _queueManager.route(PrintJob(
-                type:         PrintType.kot,
-                printerId:    printerId,
-                order:        stationOrder,
-                stationLabel: station,
-              ));
-            }
-            _log('🖨️ Aggregator KOT [$station] → ${printerIds.join(', ')} (${stationItems.length} items) #$orderId');
-          }
+          _queueAggregatorStationJobs(
+            order,
+            orderId,
+            jobType: PrintType.kot,
+            logLabel: '🖨️ Aggregator KOT',
+          );
         }
 
-        // ── Bill ──────────────────────────────────────────────────────
         if (PrintConfig.aggregatorAutoBill) {
-          final printerIds = _router.resolveForBill();
-          if (printerIds.isEmpty) {
-            _log('⚠️ No printer configured for bill');
-          } else {
-            for (final printerId in printerIds) {
-              _queueManager.route(PrintJob(
-                type:      PrintType.bill,
-                printerId: printerId,
-                order:     order,
-              ));
-            }
-            _log('🧾 Aggregator Bill queued → ${printerIds.join(', ')} #$orderId');
-          }
+          _queueAggregatorBill(order, orderId);
         }
       } catch (e) {
         _log('❌ aggregator_order error: $e');
@@ -581,6 +742,131 @@ class WindowsSocketService {
     });
 
     _log('👂 Listening: aggregator_order_$restaurantId');
+
+    // ═══════════════════════════════════════════════════════════════════
+    // MANUAL AGGREGATOR PRINT
+    // ═══════════════════════════════════════════════════════════════════
+    _socket!.off('manually_print_aggregator_$restaurantId');
+    _socket!.on('manually_print_aggregator_$restaurantId', (data) async {
+      _log('📡 Received manually_print_aggregator_$restaurantId : $data');
+      try {
+        final payload = data as List<dynamic>;
+        final eventType = payload[0].toString().toLowerCase();
+        final orderId = payload[1].toString();
+        final socketRestId = payload[2].toString();
+        final printType =
+            payload.length > 3 ? payload[3].toString().toLowerCase() : '';
+
+        if (eventType != 'manually_print_aggregator') return;
+        if (socketRestId != restaurantId) return;
+
+        if (printType != 'aggr_kot' && printType != 'aggr_bill') {
+          _log('⏩ Unknown aggregator print type: $printType — skip #$orderId');
+          return;
+        }
+
+        _log('🌐 Manual aggregator $printType for order #$orderId — fetching...');
+        final rawJson = await _fetchAggregatorOrder(orderId);
+        if (rawJson == null) {
+          _log('❌ Could not fetch aggregator order #$orderId');
+          return;
+        }
+
+        final order = RestaurantOrder.fromAggregatorApi(rawJson);
+
+        if (printType == 'aggr_kot') {
+          _queueAggregatorStationJobs(
+            order,
+            orderId,
+            jobType: PrintType.kot,
+            logLabel: '🖨️ Manual Aggregator KOT',
+          );
+        } else {
+          _queueAggregatorBill(
+            order,
+            orderId,
+            logLabel: '🧾 Manual Aggregator Bill',
+          );
+        }
+      } catch (e) {
+        _log('❌ manually_print_aggregator error: $e');
+      }
+    });
+
+    _log('👂 Listening: manually_print_aggregator_$restaurantId');
+  }
+
+  void _queueAggregatorStationJobs(
+    RestaurantOrder order,
+    String orderId, {
+    required PrintType jobType,
+    required String logLabel,
+  }) {
+    final stationGroups = <String, List<OrderItem>>{};
+    for (final item in order.items) {
+      final st = item.station?.trim().toUpperCase() ?? 'KDS';
+      stationGroups.putIfAbsent(st, () => []).add(item);
+    }
+
+    for (final station in stationGroups.keys) {
+      final stationItems = stationGroups[station]!;
+      final printerIds = _router.resolveForStation(station);
+      if (printerIds.isEmpty) {
+        _log('⚠️ No printer configured for station=$station');
+        continue;
+      }
+
+      final stationOrder = RestaurantOrder(
+        orderId: order.orderId,
+        displayOrderId: order.displayOrderId,
+        tableId: order.tableId,
+        tableName: order.tableName,
+        waiterName: order.waiterName,
+        orderAmount:
+            stationItems.fold(0.0, (s, i) => s + i.price * i.quantity),
+        orderNote: order.orderNote,
+        orderType: order.orderType,
+        printKot: 'Yes',
+        restaurantName: order.restaurantName,
+        receivedAt: order.receivedAt,
+        userCustName: order.userCustName,
+        userCustPhone: order.userCustPhone,
+        dailyToken: order.dailyToken,
+        items: stationItems,
+      );
+
+      for (final printerId in printerIds) {
+        _queueManager.route(PrintJob(
+          type: jobType,
+          printerId: printerId,
+          order: stationOrder,
+          stationLabel: station,
+        ));
+      }
+      _log(
+          '$logLabel [$station] → ${printerIds.join(', ')} (${stationItems.length} items) #$orderId');
+    }
+  }
+
+  void _queueAggregatorBill(
+    RestaurantOrder order,
+    String orderId, {
+    String logLabel = '🧾 Aggregator Bill',
+  }) {
+    final printerIds = _router.resolveForBill();
+    if (printerIds.isEmpty) {
+      _log('⚠️ No printer configured for bill');
+      return;
+    }
+
+    for (final printerId in printerIds) {
+      _queueManager.route(PrintJob(
+        type: PrintType.bill,
+        printerId: printerId,
+        order: order,
+      ));
+    }
+    _log('$logLabel queued → ${printerIds.join(', ')} #$orderId');
   }
 
   void _log(String msg) {

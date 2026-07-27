@@ -349,29 +349,34 @@ class RestaurantOrder {
             orderInfo['item_total']?.toString() ?? '0') ?? 0.0;
     final couponDiscount = double.tryParse(
             orderInfo['coupon_discount_amount']?.toString() ?? '0') ?? 0.0;
-    final taxAmount   = double.tryParse(
-            orderInfo['total_tax_amount']?.toString() ?? '0') ?? 0.0;
+    final gstAmount   = double.tryParse(
+            orderInfo['total_gst_tax_amount']?.toString() ?? '0') ?? 0.0;
+    final packingCharge = double.tryParse(
+            orderInfo['packing_charge']?.toString() ?? '0') ?? 0.0;
     final couponCode  = orderInfo['coupon_code']?.toString() ?? '';
     final platform    = orderInfo['order_plateform']?.toString() ?? 'aggregator';
 
     // Build a synthetic billData map compatible with the PDF/ESC-POS bill formatter
+    // Aggregator amounts come straight from API keys — no recalculation.
     final billData = <String, dynamic>{
-      'order_item_total':    itemTotal,
-      'order_subtotal':      itemTotal,
-      'discount_amount':     couponDiscount,
+      'is_aggregator':       true,
+      'order_item_total':    itemTotal,       // item_total
+      'order_subtotal':      itemTotal,       // unused on aggregator bill (no Sub Total row)
+      'discount_amount':     couponDiscount,  // coupon_discount_amount
       'coupon_code':         couponCode.isNotEmpty ? couponCode : null,
-      'gst_tax':             taxAmount,
+      'packing_charge':      packingCharge,   // packing_charge
+      'gst_tax':             gstAmount,       // total_gst_tax_amount
       'vat_tax':             0.0,
       'service_charge_amount': 0.0,
       'delivery_charge':     double.tryParse(
               orderInfo['delivery_charge']?.toString() ?? '0') ?? 0.0,
       'tip_amount':          double.tryParse(
               orderInfo['tip_amount']?.toString() ?? '0') ?? 0.0,
-      'grant_amount':        orderAmount,
+      'grant_amount':        orderAmount,     // order_amount → TOTAL
       'payment_amount':      orderAmount,
       'payment_status':      orderInfo['payment_status']?.toString() ?? 'unpaid',
       'payment_method':      orderInfo['payment_method']?.toString() ?? 'aggregator',
-      'order_type':          orderInfo['order_type']?.toString() ?? 'delivery',
+      'order_type':          '',
       'table_name':          platform.toUpperCase(),
       'waiter_name':         platform[0].toUpperCase() + platform.substring(1),
       'order_note':          orderInfo['order_note']?.toString() ?? '',

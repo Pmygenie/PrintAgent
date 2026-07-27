@@ -200,6 +200,7 @@ class PrintConfig {
   static bool autoPrintBill = true;
   static bool aggregatorAutoKot = false;
   static bool aggregatorAutoBill = false;
+  static bool scanOrderAutoPrint = false;
   static bool usePdfPrintingOnWindows = true;
   static bool usePdfForBillsOnly = false;
   static bool showItemDateOn80mm = false;
@@ -236,6 +237,7 @@ class PrintConfig {
     autoPrintBill = p.getBool('autoPrintBill') ?? true;
     aggregatorAutoKot = p.getBool('aggregatorAutoKot') ?? false;
     aggregatorAutoBill = p.getBool('aggregatorAutoBill') ?? false;
+    scanOrderAutoPrint = p.getBool('scanOrderAutoPrint') ?? false;
     kotCopies = p.getInt('kotCopies') ?? 1;
     billCopies = p.getInt('billCopies') ?? 1;
     restaurantId = p.getInt('restaurantId') ?? 618;
@@ -280,6 +282,7 @@ class PrintConfig {
     await p.setBool('autoPrintBill', autoPrintBill);
     await p.setBool('aggregatorAutoKot', aggregatorAutoKot);
     await p.setBool('aggregatorAutoBill', aggregatorAutoBill);
+    await p.setBool('scanOrderAutoPrint', scanOrderAutoPrint);
     await p.setInt('kotCopies', kotCopies);
     await p.setInt('billCopies', billCopies);
     await p.setInt('restaurantId', restaurantId);

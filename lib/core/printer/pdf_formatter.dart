@@ -575,10 +575,12 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
     final subTotal = d('order_subtotal');
     final gstTax = d('gst_tax');
     final vatTax = d('vat_tax');
+    final packingCharge = d('packing_charge');
     final grantAmount = d('grant_amount');
     final paymentAmount = d('payment_amount');
     final roomAdvance = d('room_advance_pay');
     final roomPending = d('room_remaining_pay');
+    final isAggregator = bill['is_aggregator'] == true;
 
     final paymentStatus = bill['payment_status']?.toString() ?? '';
     final paymentMethod = bill['payment_method']?.toString() ?? '';
@@ -718,6 +720,11 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
           ),
         if (discountAmount > 0)
           ..._billAmountLineWidgets('Discount', discountAmount.toString()),
+        if (packingCharge > 0)
+          ..._billAmountLineWidgets(
+            'Packing Charge',
+            packingCharge.toStringAsFixed(2),
+          ),
         if (couponCode.isNotEmpty)
           ..._billAmountLineWidgets('Coupon Code', couponCode),
         if (loyaltyAmount > 0)
@@ -725,10 +732,15 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
         if (walletAmount > 0)
           ..._billAmountLineWidgets('Wallet', walletAmount.toString()),
         if (tip > 0) ..._billAmountLineWidgets('Tip', tip.toStringAsFixed(2)),
-        ..._billAmountLineWidgets('Sub Total', subTotal.toStringAsFixed(2)),
+        if (!isAggregator)
+          ..._billAmountLineWidgets('Sub Total', subTotal.toStringAsFixed(2)),
         if (gstTax > 0) ...[
-          ..._billAmountLineWidgets('CGST', (gstTax / 2).toStringAsFixed(2)),
-          ..._billAmountLineWidgets('SGST', (gstTax / 2).toStringAsFixed(2)),
+          if (isAggregator)
+            ..._billAmountLineWidgets('Total Tax', gstTax.toStringAsFixed(2))
+          else ...[
+            ..._billAmountLineWidgets('CGST', (gstTax / 2).toStringAsFixed(2)),
+            ..._billAmountLineWidgets('SGST', (gstTax / 2).toStringAsFixed(2)),
+          ],
         ],
         if (vatTax > 0)
           ..._billAmountLineWidgets('VAT', vatTax.toStringAsFixed(2)),
@@ -736,12 +748,12 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
         // ── Total ──
         _simpleDividerOrDotted ? _divider(dashed: true) : buildDottedLine(180),
 
-        ..._billTotalRow(totalLabel, totalAmount.toStringAsFixed(0),
+        ..._billTotalRow(totalLabel, _formatMoney(totalAmount),
             _billTotalTextSize, _billTotalTextBold,
-            subLabel: payLabel()),
+            subLabel: isAggregator ? null : payLabel()),
 
         // ── Delivery details ──
-        if (bill['order_type']?.toString() == 'delivery') ...[
+        if (bill['order_type']?.toString() == 'delivery' && !isAggregator) ...[
           _simpleDividerOrDotted
               ? _divider(dashed: true)
               : buildDottedLine(180),

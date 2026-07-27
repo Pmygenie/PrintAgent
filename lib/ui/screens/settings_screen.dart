@@ -39,6 +39,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _autoPrintBill = true;
   bool _aggregatorAutoKot  = false;
   bool _aggregatorAutoBill = false;
+  bool _scanOrderAutoPrint = false;
   bool _obscureToken  = true;
   bool _is80mm        = false;
   bool _usePdfPrintingOnWindows = true;
@@ -81,6 +82,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _autoPrintBill            = PrintConfig.autoPrintBill;
     _aggregatorAutoKot        = PrintConfig.aggregatorAutoKot;
     _aggregatorAutoBill       = PrintConfig.aggregatorAutoBill;
+    _scanOrderAutoPrint       = PrintConfig.scanOrderAutoPrint;
     _is80mm                   = PrintConfig.is80mm;
     _usePdfPrintingOnWindows  = PrintConfig.usePdfPrintingOnWindows;
     _showItemDateOn80mm       = PrintConfig.showItemDateOn80mm;
@@ -120,6 +122,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     PrintConfig.autoPrintBill            = _autoPrintBill;
     PrintConfig.aggregatorAutoKot        = _aggregatorAutoKot;
     PrintConfig.aggregatorAutoBill       = _aggregatorAutoBill;
+    PrintConfig.scanOrderAutoPrint       = _scanOrderAutoPrint;
     PrintConfig.is80mm                   = _is80mm;
     PrintConfig.usePdfPrintingOnWindows  = _usePdfPrintingOnWindows;
     PrintConfig.showItemDateOn80mm       = _showItemDateOn80mm;
@@ -328,6 +331,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: 'Print bill on manually_print bill event',
             value:    _autoPrintBill,
             onChanged: (v) => setState(() => _autoPrintBill = v),
+          ),
+          _toggle(
+            label:    'Scan Order Auto Print',
+            subtitle: 'Print KOT automatically for scanned (scan-new-order) orders',
+            value:    _scanOrderAutoPrint,
+            onChanged: (v) => setState(() => _scanOrderAutoPrint = v),
           ),
           const SizedBox(height: 16),
 

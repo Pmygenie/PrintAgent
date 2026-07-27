@@ -583,11 +583,13 @@ class EscPosFormatter {
     final subTotal = d('order_subtotal');
     final gstTax = d('gst_tax');
     final vatTax = d('vat_tax');
+    final packingCharge = d('packing_charge') ?? 0;
     final grantAmount = d('grant_amount');
     final paymentAmount = d('payment_amount');
     final roomAdvance = d('room_advance_pay');
     final roomPending = d('room_remaining_pay');
     final roundOff = d('');
+    final isAggregator = bill['is_aggregator'] == true;
     final paymentStatus = bill['payment_status']?.toString() ?? '';
     final paymentMethod = bill['payment_method']?.toString() ?? '';
     final walletAmount =
@@ -665,6 +667,11 @@ class EscPosFormatter {
       b += g.text(_alignRightLabelValue('Discount', discountAmount.toString()));
     }
 
+    if (packingCharge > 0) {
+      b += g.text(_alignRightLabelValue(
+          'Packing Charge', packingCharge.toStringAsFixed(2)));
+    }
+
     if (couponCode != '') {
       b += g.text(_alignRightLabelValue('Coupon Code', couponCode.toString()));
     }
@@ -681,13 +688,19 @@ class EscPosFormatter {
       b += g.text(_alignRightLabelValue('Tip', tip.toStringAsFixed(2)));
     }
 
-    b +=
-        g.text(_alignRightLabelValue('Sub Total', subTotal.toStringAsFixed(2)));
+    if (!isAggregator) {
+      b += g
+          .text(_alignRightLabelValue('Sub Total', subTotal.toStringAsFixed(2)));
+    }
 
     if (gstTax > 0) {
-      final half = gstTax / 2;
-      b += g.text(_alignRightLabelValue('CGST', half.toStringAsFixed(2)));
-      b += g.text(_alignRightLabelValue('SGST', half.toStringAsFixed(2)));
+      if (isAggregator) {
+        b += g.text(_alignRightLabelValue('GST', gstTax.toStringAsFixed(2)));
+      } else {
+        final half = gstTax / 2;
+        b += g.text(_alignRightLabelValue('CGST', half.toStringAsFixed(2)));
+        b += g.text(_alignRightLabelValue('SGST', half.toStringAsFixed(2)));
+      }
     }
 
     if (vatTax > 0) {
@@ -699,9 +712,11 @@ class EscPosFormatter {
 
     // Total — room = payment_amount, normal = grant_amount
     final totalAmount = isRoomOrder ? paymentAmount : grantAmount;
-    final totalLabel = isRoomOrder ? 'TOTAL' : 'TOTAL ${payLabel()}';
+    final totalLabel = isRoomOrder || isAggregator
+        ? 'TOTAL'
+        : 'TOTAL ${payLabel()}';
     b += g.text(
-      _alignLR(totalLabel, totalAmount.toStringAsFixed(0)),
+      _alignLR(totalLabel, _formatMoney(totalAmount ?? 0)),
       styles: const PosStyles(bold: true, align: PosAlign.center),
     );
 
