@@ -8,6 +8,8 @@ import 'package:printer_agent/drivers/windows_usb_driver.dart';
 import 'package:printing/printing.dart';
 import '../models/print_job.dart';
 import '../models/printer_config.dart';
+import 'bitmap/bitmap_formatter.dart';
+import 'bitmap/bitmap_print_config.dart';
 import 'escpos_formatter.dart';
 import '../../drivers/printer_driver.dart';
 import '../../drivers/lan_driver.dart';
@@ -96,7 +98,9 @@ class PrinterManager {
       return;
     }
     final driver = _buildDriver(config);
-    final bytes = await EscPosFormatter.format(job);
+    final bytes = BitmapPrintConfig.enabled
+        ? await BitmapFormatter.format(job)
+        : await EscPosFormatter.format(job);
 
     await driver.connect();
     try {

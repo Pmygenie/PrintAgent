@@ -15,6 +15,7 @@ dependencies:
 
   # ── ESC/POS formatter (all printer types) ───
   esc_pos_utils_plus: ^2.0.3
+  image: ^4.5.4
   usb_serial: ^0.5.0
 
   # ── Printer drivers (LAN + USB + Android BT)─

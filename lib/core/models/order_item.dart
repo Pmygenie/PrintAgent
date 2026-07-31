@@ -31,6 +31,19 @@ class OrderItem {
     this.createdAt,
   });
 
+  static String _normalizeUnit(dynamic raw) {
+    final text = (raw ?? '').toString().trim();
+    if (text.isEmpty) return '';
+
+    final lower = text.toLowerCase();
+    if (lower == 'null') return '';
+
+    final numeric = double.tryParse(text);
+    if (numeric != null && numeric == 0) return '';
+
+    return text;
+  }
+
   factory OrderItem.fromJson(Map<String, dynamic> detail) {
     final food = Map<String, dynamic>.from(detail['food_details'] ?? {});
 
@@ -92,15 +105,16 @@ class OrderItem {
       addonTotal += addonPrice * qty;
     }
 
+    final detailUnit = _normalizeUnit(detail['item_unit']);
+    final foodUnit = _normalizeUnit(food['item_unit']);
+
     return OrderItem(
       name: food['name']?.toString() ?? 'Unknown Item',
       quantity: double.tryParse(
             detail['quantity']?.toString() ?? '1',
           ) ??
           1.0,
-      itemUnit: (detail['item_unit']?.toString().isNotEmpty == true)
-          ? detail['item_unit'].toString() ?? ''
-          : (food['item_unit']?.toString() ?? ''),
+      itemUnit: detailUnit.isNotEmpty ? detailUnit : foodUnit,
       price: double.tryParse(food['price']?.toString() ?? '0') ?? 0.0,
       note: detail['food_level_notes']?.toString().isNotEmpty == true
           ? detail['food_level_notes'].toString()

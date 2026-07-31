@@ -1308,8 +1308,9 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
     final metaStyle = _text(size: metaSize, bold: metaBold);
 
     for (final item in o.items) {
+      if (item.foodStatus == 3) continue;
+
       final isComp = item.complementary?.toString().toLowerCase() == 'yes';
-      final isCancelled = item.foodStatus == 3;
 
       final effectivePrice =
           (item.itemUnit.isNotEmpty && item.itemUnitPrice > 0)
@@ -1327,8 +1328,6 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
       final amt = isComp ? 0.0 : unitTotalPrice * item.quantity;
 
       final displayName = isComp ? '${item.name} (Comp)' : item.name;
-      final cancelledName =
-          isCancelled ? '$displayName (Cancelled)' : displayName;
 
       final qtyDisplay = item.itemUnit.isNotEmpty
           ? '${_formatQty(item.quantity)}${item.itemUnit}'
@@ -1343,7 +1342,7 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
           : _formatMoney(basePrice);
 
       final nameWidget = await ReceiptTextRenderer.buildReceiptText(
-        cancelledName,
+        displayName,
         fontSize: textSize,
         fontWeight: textbold ? FontWeight.bold : FontWeight.normal,
         pdfStyle: contentStyle,
@@ -1435,17 +1434,17 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
         }
       }
 
-      if (item.note.trim().isNotEmpty) {
-        rows.add(
-          pw.Padding(
-            padding: pw.EdgeInsets.only(left: indentLeft, top: 1),
-            child: pw.Text(
-              'Note: ${item.note.trim()}',
-              style: _text(size: metaSize),
-            ),
-          ),
-        );
-      }
+      // if (item.note.trim().isNotEmpty) {
+      //   rows.add(
+      //     pw.Padding(
+      //       padding: pw.EdgeInsets.only(left: indentLeft, top: 1),
+      //       child: pw.Text(
+      //         'Note: ${item.note.trim()}',
+      //         style: _text(size: metaSize),
+      //       ),
+      //     ),
+      //   );
+      // }
 
       rows.add(pw.SizedBox(height: _is80mm ? 2 : 1));
     }

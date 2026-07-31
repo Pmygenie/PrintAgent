@@ -484,6 +484,8 @@ class EscPosFormatter {
 
     // ── Items loop ── complementary + variations + add-ons
     for (final item in o.items) {
+      if (item.foodStatus == 3) continue;
+
       final double unitPrice =
           (item.itemUnit.isNotEmpty && item.itemUnitPrice > 0
                   ? item.itemUnitPrice
@@ -494,17 +496,14 @@ class EscPosFormatter {
       final amt = unitPrice * item.quantity;
 
       final isComp = item.complementary?.toString().toLowerCase() == 'yes';
-      final isCancelled = item.foodStatus == 3;
 
       final qtyDisplay = item.itemUnit.isNotEmpty
           ? '${_formatQty(item.quantity)}${item.itemUnit}'
           : _formatQty(item.quantity);
 
       final displayName = isComp ? '${item.name} (Comp)' : item.name;
-      final cancelledName =
-          isCancelled ? '$displayName (Cancelled)' : displayName;
 
-      final itemNameLines = _wrapText(cancelledName, itemWidth);
+      final itemNameLines = _wrapText(displayName, itemWidth);
 
       final dateStr = show80mmDate ? _escItemDate(item.createdAt) : '';
 
