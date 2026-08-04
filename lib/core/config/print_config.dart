@@ -200,6 +200,7 @@ class PrintConfig {
   static bool autoPrintBill = true;
   static bool aggregatorAutoKot = false;
   static bool aggregatorAutoBill = false;
+  static String aggregatorAutoBillStage = 'Acknowledged';
   static bool scanOrderAutoPrint = false;
   static bool usePdfPrintingOnWindows = true;
   static bool usePdfForBillsOnly = false;
@@ -224,8 +225,25 @@ class PrintConfig {
 
   static Set<String> stations = {'KDS'};
 
+  // ✅ NEW — QR code config (bill only, never on aggregator/KOT)
+  static bool feedbackQrEnabled = false;
+  static String feedbackQrUrl = '';
+  static bool upiQrEnabled = false;
+  static String upiId = '';
+
   // ── Helpers ───────────────────────────────────────────
   static bool get hasNoStations => stations.isEmpty;
+
+  /// Feedback QR payload — uses configured URL, else falls back to the
+  /// standard MyGenie feedback link with the numeric order id.
+  static String feedbackQrData(int orderId) {
+    return feedbackQrUrl.trim().isNotEmpty
+        ? feedbackQrUrl.trim()
+        : 'https://order.mygenie.online/feedback?orderId=$orderId';
+  }
+
+  /// UPI payment QR payload — static amount (customer enters amount).
+  static String get upiQrData => 'upi://pay?pa=$upiId&pn=&am=0&tn=';
 
   static bool matchesStation(String socketStation) => stations
       .any((s) => s.trim().toUpperCase() == socketStation.trim().toUpperCase());
@@ -237,6 +255,12 @@ class PrintConfig {
     autoPrintBill = p.getBool('autoPrintBill') ?? true;
     aggregatorAutoKot = p.getBool('aggregatorAutoKot') ?? false;
     aggregatorAutoBill = p.getBool('aggregatorAutoBill') ?? false;
+    aggregatorAutoBillStage =
+        p.getString('aggregatorAutoBillStage') ?? 'Acknowledged';
+    if (aggregatorAutoBillStage != 'Acknowledged' &&
+        aggregatorAutoBillStage != 'Food Ready') {
+      aggregatorAutoBillStage = 'Acknowledged';
+    }
     scanOrderAutoPrint = p.getBool('scanOrderAutoPrint') ?? false;
     kotCopies = p.getInt('kotCopies') ?? 1;
     billCopies = p.getInt('billCopies') ?? 1;
@@ -273,6 +297,12 @@ class PrintConfig {
     lanIp = p.getString('lanIp') ?? '';
     lanPort = p.getInt('lanPort') ?? 9100;
     macAddress = p.getString('macAddress') ?? '';
+
+    // ✅ NEW — Load QR code config
+    feedbackQrEnabled = p.getBool('feedbackQrEnabled') ?? false;
+    feedbackQrUrl = p.getString('feedbackQrUrl') ?? '';
+    upiQrEnabled = p.getBool('upiQrEnabled') ?? false;
+    upiId = p.getString('upiId') ?? '';
   }
 
   // ── Save ──────────────────────────────────────────────
@@ -282,6 +312,7 @@ class PrintConfig {
     await p.setBool('autoPrintBill', autoPrintBill);
     await p.setBool('aggregatorAutoKot', aggregatorAutoKot);
     await p.setBool('aggregatorAutoBill', aggregatorAutoBill);
+    await p.setString('aggregatorAutoBillStage', aggregatorAutoBillStage);
     await p.setBool('scanOrderAutoPrint', scanOrderAutoPrint);
     await p.setInt('kotCopies', kotCopies);
     await p.setInt('billCopies', billCopies);
@@ -305,6 +336,12 @@ class PrintConfig {
     await p.setString('lanIp', lanIp);
     await p.setInt('lanPort', lanPort);
     await p.setString('macAddress', macAddress);
+
+    // ✅ NEW — Save QR code config
+    await p.setBool('feedbackQrEnabled', feedbackQrEnabled);
+    await p.setString('feedbackQrUrl', feedbackQrUrl);
+    await p.setBool('upiQrEnabled', upiQrEnabled);
+    await p.setString('upiId', upiId);
   }
 
   static bool get isConfigured =>

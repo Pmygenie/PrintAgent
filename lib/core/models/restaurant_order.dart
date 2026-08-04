@@ -93,6 +93,100 @@ class RestaurantOrder {
     );
   }
 
+  /// Maps socket new-order fields into the billData shape used by bill formatters.
+  /// Does not change [fromJson]; only used for socket auto-bill.
+  static Map<String, dynamic> billDataFromSocketOrder(Map<String, dynamic> json) {
+    final employee = Map<String, dynamic>.from(json['vendorEmployee'] ?? {});
+    final table = json['restaurantTable'] != null
+        ? Map<String, dynamic>.from(json['restaurantTable'])
+        : null;
+    final user =
+        json['user'] != null ? Map<String, dynamic>.from(json['user']) : null;
+
+    final custName = user?['f_name']?.toString().trim() ??
+        json['user_name']?.toString().trim() ??
+        '';
+    final custPhone = user?['phone']?.toString().trim() ?? '';
+    final waiterName = [
+      employee['f_name']?.toString() ?? '',
+    ].where((s) => s.isNotEmpty).join(' ');
+
+    final grantAmount =
+        double.tryParse(json['order_amount']?.toString() ?? '0') ?? 0.0;
+    final paymentAmount = double.tryParse(
+          json['payment_amount']?.toString() ?? '',
+        ) ??
+        grantAmount;
+
+    final serviceCharge = double.tryParse(
+          json['service_tax']?.toString() ??
+              json['total_service_tax_amount']?.toString() ??
+              '0',
+        ) ??
+        0.0;
+
+    final orderType = json['order_type']?.toString().trim() ?? '';
+    final tableNo = table?['table_no']?.toString().trim() ?? '';
+    // dinein + null/empty table → WC; dinein + table → table_no;
+    // non-dinein → billCenterLabel uses order_type as-is.
+    final tableName =
+        orderType == 'dinein' ? (tableNo.isEmpty ? 'WC' : tableNo) : '';
+
+    final delivery = json['delivery_address'] != null
+        ? Map<String, dynamic>.from(json['delivery_address'] as Map)
+        : <String, dynamic>{};
+
+    return {
+      'order_item_total':
+          double.tryParse(json['order_sub_total_amount']?.toString() ?? '0') ??
+              0.0,
+      'order_subtotal': double.tryParse(
+            json['order_sub_total_without_tax']?.toString() ?? '0',
+          ) ??
+          0.0,
+      'service_charge_amount': serviceCharge,
+      'delivery_charge':
+          double.tryParse(json['delivery_charge']?.toString() ?? '0') ?? 0.0,
+      'tip_amount':
+          double.tryParse(json['tip_amount']?.toString() ?? '0') ?? 0.0,
+      'gst_tax': double.tryParse(json['gst_tax']?.toString() ?? '0') ?? 0.0,
+      'vat_tax': double.tryParse(json['vat_tax']?.toString() ?? '0') ?? 0.0,
+      'packing_charge':
+          double.tryParse(json['packing_charge']?.toString() ?? '0') ?? 0.0,
+      'discount_amount':
+          double.tryParse(json['order_discount']?.toString() ?? '0') ?? 0.0,
+      'grant_amount': grantAmount,
+      'payment_amount': paymentAmount,
+      'payment_status': json['payment_status']?.toString() ?? '',
+      'payment_method': json['payment_method']?.toString() ?? '',
+      'order_type': orderType,
+      'table_name': tableName,
+      'waiter_name': waiterName,
+      'order_note': json['order_note']?.toString() ?? '',
+      'cust_name': custName,
+      'cust_phone': custPhone,
+      'cust_gst_name': json['cust_gst_name']?.toString() ??
+          user?['gst_name']?.toString() ??
+          '',
+      'cust_gst':
+          json['cust_gst']?.toString() ?? user?['gst_number']?.toString() ?? '',
+      'wallet_used_amount':
+          double.tryParse(json['wallet_used_amount']?.toString() ?? '0') ?? 0.0,
+      'loyalty_discount_amount': double.tryParse(
+            json['loyalty_discount_amount']?.toString() ?? '0',
+          ) ??
+          0.0,
+      'coupon_code': json['coupon_code']?.toString() ?? '',
+      'delivery_cust_name':
+          delivery['contact_person_name']?.toString() ?? '',
+      'delivery_cust_phone':
+          delivery['contact_person_number']?.toString() ?? '',
+      'delivery_address_type': delivery['address_type']?.toString() ?? '',
+      'delivery_cust_address': delivery['address']?.toString() ?? '',
+      'delivery_cust_pincode': delivery['pincode']?.toString() ?? '',
+    };
+  }
+
   Map<String, dynamic> toMap() => {
         'orderId': orderId,
         'displayOrderId': displayOrderId,
@@ -301,7 +395,7 @@ class RestaurantOrder {
       double addonTotal = 0.0;
       for (final a in addOnData) {
         final map       = Map<String, dynamic>.from(a as Map);
-        final name      = map['name']?.toString() ?? '';
+        final name      = map['title']?.toString() ?? '';
         final qty       = int.tryParse(map['quantity']?.toString() ?? '1') ?? 1;
         final addonPrice = double.tryParse(map['price']?.toString() ?? '0') ?? 0.0;
         if (name.isNotEmpty) {
@@ -318,8 +412,7 @@ class RestaurantOrder {
               detail['name']?.toString() ??
               'Unknown Item',
         quantity: double.tryParse(detail['quantity']?.toString() ?? '1') ?? 1.0,
-        price: double.tryParse(detail['price']?.toString() ??
-                               food['price']?.toString() ?? '0') ?? 0.0,
+        price: double.tryParse(detail['unit_price']?.toString() ?? food['price']?.toString() ?? '0') ?? 0.0,
         note: detail['food_level_notes']?.toString().isNotEmpty == true
             ? detail['food_level_notes'].toString()
             : '',
@@ -355,6 +448,7 @@ class RestaurantOrder {
             orderInfo['packing_charge']?.toString() ?? '0') ?? 0.0;
     final couponCode  = orderInfo['coupon_code']?.toString() ?? '';
     final platform    = orderInfo['order_plateform']?.toString() ?? 'aggregator';
+    final brandName   = ordersRoot['brand_name']?.toString().trim() ?? '';
 
     // Build a synthetic billData map compatible with the PDF/ESC-POS bill formatter
     // Aggregator amounts come straight from API keys — no recalculation.
@@ -376,7 +470,7 @@ class RestaurantOrder {
       'payment_amount':      orderAmount,
       'payment_status':      orderInfo['payment_status']?.toString() ?? 'unpaid',
       'payment_method':      orderInfo['payment_method']?.toString() ?? 'aggregator',
-      'order_type':          '',
+      'order_type':          brandName,
       'table_name':          platform.toUpperCase(),
       'waiter_name':         platform[0].toUpperCase() + platform.substring(1),
       'order_note':          orderInfo['order_note']?.toString() ?? '',
@@ -387,13 +481,13 @@ class RestaurantOrder {
 
     return RestaurantOrder(
       orderId:        orderInfo['id'] ?? 0,
-      displayOrderId: orderInfo['restaurant_order_id']?.toString() ?? '',
+      displayOrderId: orderInfo['aggrigator_id']?.toString() ?? '',
       tableId:        orderInfo['table_id'] ?? 0,
       tableName:      platform.toUpperCase(),
       waiterName:     platform[0].toUpperCase() + platform.substring(1),
       orderAmount:    orderAmount,
       orderNote:      orderInfo['order_note']?.toString() ?? '',
-      orderType:      orderInfo['order_type']?.toString() ?? 'delivery',
+      orderType:      brandName,
       printKot:       'Yes',
       restaurantName: PrintConfig.restaurantName,
       receivedAt:     receivedAt,

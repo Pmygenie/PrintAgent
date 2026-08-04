@@ -146,6 +146,35 @@ class PrintStyleScreen extends StatelessWidget {
                           ),
                         ],
                       ),
+                      const SizedBox(height: 16),
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'QR Code Size (mm)',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w600, fontSize: 13),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildMarginField(
+                              label: 'UPI QR',
+                              value: c.upiQrSizeMm,
+                              onChanged: ctrl.updateUpiQrSize,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _buildMarginField(
+                              label: 'Feedback QR',
+                              value: c.feedbackQrSizeMm,
+                              onChanged: ctrl.updateFeedbackQrSize,
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                 ),

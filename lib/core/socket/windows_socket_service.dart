@@ -16,6 +16,8 @@ class WindowsSocketService {
   final PrinterRouter _router;
   final Set<int> _printedIds = {};
   final Set<int> _cancelledPrintedIds = {};
+  final Set<int> _socketBillPrintedIds = {};
+  final Set<int> _aggregatorBillPrintedIds = {};
 
   bool _connected = false;
   bool get isConnected => _connected;
@@ -215,9 +217,10 @@ class WindowsSocketService {
         final rawPayload =
             payload[4] is String ? jsonDecode(payload[4]) : payload[4];
 
-        final orderMap = (rawPayload is Map && rawPayload['orders'] != null)
+        final orderMapRaw = (rawPayload is Map && rawPayload['orders'] != null)
             ? (rawPayload['orders'] as List).first
-            : rawPayload as Map<String, dynamic>;
+            : rawPayload;
+        final orderMap = Map<String, dynamic>.from(orderMapRaw as Map);
 
         final order = RestaurantOrder.fromJson(orderMap);
 
@@ -225,6 +228,13 @@ class WindowsSocketService {
         if (!PrintConfig.autoPrint) {
           _log('⏸️ Auto print OFF — skip #${order.displayOrderId}');
           return;
+        }
+
+        // ── Socket auto-bill (new-order only) ─────────────────────────
+        // Independent of print_kot and printer_agent. Requires BOTH flags Yes.
+        // Does not alter KOT / update / scan / manual / aggregator paths.
+        if (eventType == 'new-order') {
+          _tryQueueSocketAutoBill(orderMap, order);
         }
 
         // ── GATE 4: printKot check ────────────────────────────────────
@@ -639,10 +649,12 @@ class WindowsSocketService {
         // ── GATE 2: Restaurant check ──────────────────────────────────
         if (socketRestId != restaurantId) return;
 
-        // ── GATE 3: Acknowledged (KOT/Bill) or Cancelled (Cancel KOT) ─
-        if (status != 'Acknowledged' && status != 'Cancelled') {
+        // ── GATE 3: Acknowledged / Food Ready / Cancelled ─────────────
+        if (status != 'Acknowledged' &&
+            status != 'Cancelled' &&
+            status != 'Food Ready') {
           _log(
-              '⏩ Aggregator status=$status — skip (only Acknowledged / Cancelled)');
+              '⏩ Aggregator status=$status — skip (only Acknowledged / Food Ready / Cancelled)');
           return;
         }
 
@@ -698,23 +710,64 @@ class WindowsSocketService {
         }
 
         // ═══════════════════════════════════════════════════════════════
-        // ACKNOWLEDGED → KOT / Bill (existing behaviour)
+        // FOOD READY → Bill only (if stage = Food Ready)
         // ═══════════════════════════════════════════════════════════════
+        if (status == 'Food Ready') {
+          if (!PrintConfig.aggregatorAutoBill) {
+            _log('⏸️ Aggregator Auto Bill OFF — skip Food Ready #$orderId');
+            return;
+          }
+          if (PrintConfig.aggregatorAutoBillStage != 'Food Ready') {
+            _log(
+                '⏩ Aggregator Food Ready #$orderId — bill stage=${PrintConfig.aggregatorAutoBillStage} — skip');
+            return;
+          }
+          if (_aggregatorBillPrintedIds.contains(orderIdInt)) {
+            _log(
+                '⏩ Aggregator bill #$orderId already printed — skip duplicate');
+            return;
+          }
 
-        // ── GATE 4: At least one toggle ON ────────────────────────────
-        if (!PrintConfig.aggregatorAutoKot && !PrintConfig.aggregatorAutoBill) {
-          _log('⏸️ Aggregator Auto KOT & Bill both OFF — skip #$orderId');
+          _log('🌐 Fetching aggregator order #$orderId (Food Ready bill)...');
+          final rawJson = await _fetchAggregatorOrder(orderId);
+          if (rawJson == null) {
+            _log('❌ Could not fetch aggregator order #$orderId');
+            return;
+          }
+
+          _aggregatorBillPrintedIds.add(orderIdInt);
+          final order = RestaurantOrder.fromAggregatorApi(rawJson);
+          _queueAggregatorBill(order, orderId);
           return;
         }
 
-        // ── GATE 5: Deduplication ─────────────────────────────────────
-        if (_printedIds.contains(orderIdInt)) {
-          _log('⏩ Aggregator order #$orderId already printed — skip duplicate');
+        // ═══════════════════════════════════════════════════════════════
+        // ACKNOWLEDGED → KOT + Bill (if stage = Acknowledged)
+        // ═══════════════════════════════════════════════════════════════
+        final shouldPrintKot = PrintConfig.aggregatorAutoKot;
+        final shouldPrintBill = PrintConfig.aggregatorAutoBill &&
+            PrintConfig.aggregatorAutoBillStage == 'Acknowledged';
+
+        if (!shouldPrintKot && !shouldPrintBill) {
+          _log(
+              '⏸️ Aggregator Acknowledged #$orderId — nothing to print '
+              '(kot=${PrintConfig.aggregatorAutoKot}, '
+              'bill=${PrintConfig.aggregatorAutoBill}, '
+              'stage=${PrintConfig.aggregatorAutoBillStage})');
           return;
         }
-        _printedIds.add(orderIdInt);
 
-        // ── Fetch order from aggregator API ───────────────────────────
+        final needKot =
+            shouldPrintKot && !_printedIds.contains(orderIdInt);
+        final needBill = shouldPrintBill &&
+            !_aggregatorBillPrintedIds.contains(orderIdInt);
+
+        if (!needKot && !needBill) {
+          _log(
+              '⏩ Aggregator Acknowledged #$orderId already printed — skip duplicate');
+          return;
+        }
+
         _log('🌐 Fetching aggregator order #$orderId...');
         final rawJson = await _fetchAggregatorOrder(orderId);
         if (rawJson == null) {
@@ -724,7 +777,8 @@ class WindowsSocketService {
 
         final order = RestaurantOrder.fromAggregatorApi(rawJson);
 
-        if (PrintConfig.aggregatorAutoKot) {
+        if (needKot) {
+          _printedIds.add(orderIdInt);
           _queueAggregatorStationJobs(
             order,
             orderId,
@@ -733,7 +787,8 @@ class WindowsSocketService {
           );
         }
 
-        if (PrintConfig.aggregatorAutoBill) {
+        if (needBill) {
+          _aggregatorBillPrintedIds.add(orderIdInt);
           _queueAggregatorBill(order, orderId);
         }
       } catch (e) {
@@ -867,6 +922,77 @@ class WindowsSocketService {
       ));
     }
     _log('$logLabel queued → ${printerIds.join(', ')} #$orderId');
+  }
+
+  /// Auto-bill from new-order socket when both flags are Yes.
+  /// No printer_agent / BILL-station gate — uses local bill printers only.
+  void _tryQueueSocketAutoBill(
+    Map<String, dynamic> orderMap,
+    RestaurantOrder order,
+  ) {
+    final billingAuto =
+        orderMap['billing_auto_bill_print']?.toString().trim() ?? '';
+    final printBillStatus =
+        orderMap['print_bill_status']?.toString().trim() ?? '';
+
+    if (billingAuto != 'Yes' || printBillStatus != 'Yes') {
+      _log(
+        '⏩ Socket auto-bill skipped '
+        '(billing_auto_bill_print=$billingAuto, print_bill_status=$printBillStatus) '
+        '#${order.displayOrderId}',
+      );
+      return;
+    }
+
+    if (!PrintConfig.autoPrintBill) {
+      _log('⏸️ Auto Bill print OFF — skip socket bill #${order.displayOrderId}');
+      return;
+    }
+
+    if (_socketBillPrintedIds.contains(order.orderId)) {
+      _log(
+        '⏩ Socket auto-bill already queued for #${order.displayOrderId} — skip',
+      );
+      return;
+    }
+
+    final printerIds = _router.resolveForBill();
+    if (printerIds.isEmpty) {
+      _log('⚠️ No bill printer configured — skip socket bill #${order.displayOrderId}');
+      return;
+    }
+
+    _socketBillPrintedIds.add(order.orderId);
+
+    final billOrder = RestaurantOrder(
+      orderId: order.orderId,
+      displayOrderId: order.displayOrderId,
+      tableId: order.tableId,
+      tableName: order.tableName,
+      waiterName: order.waiterName,
+      orderAmount: order.orderAmount,
+      orderNote: order.orderNote,
+      orderType: order.orderType,
+      printKot: order.printKot,
+      restaurantName: order.restaurantName,
+      receivedAt: order.receivedAt,
+      userCustName: order.userCustName,
+      userCustPhone: order.userCustPhone,
+      dailyToken: order.dailyToken,
+      items: order.items,
+      billData: RestaurantOrder.billDataFromSocketOrder(orderMap),
+    );
+
+    for (final printerId in printerIds) {
+      _queueManager.route(PrintJob(
+        type: PrintType.bill,
+        printerId: printerId,
+        order: billOrder,
+      ));
+    }
+    _log(
+      '🧾 Socket auto-bill queued → ${printerIds.join(', ')} #${order.displayOrderId}',
+    );
   }
 
   void _log(String msg) {

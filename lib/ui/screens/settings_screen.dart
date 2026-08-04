@@ -33,17 +33,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _restaurantNameCtrl = TextEditingController();
   final _kotCopiesCtrl      = TextEditingController();
   final _billCopiesCtrl     = TextEditingController();
+  final _feedbackQrUrlCtrl  = TextEditingController();
+  final _upiIdCtrl          = TextEditingController();
 
   // ── Global print toggles ─────────────────────────────────────────────────
   bool _autoPrint     = true;
   bool _autoPrintBill = true;
   bool _aggregatorAutoKot  = false;
   bool _aggregatorAutoBill = false;
+  String _aggregatorAutoBillStage = 'Acknowledged';
   bool _scanOrderAutoPrint = false;
   bool _obscureToken  = true;
   bool _is80mm        = false;
   bool _usePdfPrintingOnWindows = true;
   bool _showItemDateOn80mm = false;
+  bool _feedbackQrEnabled = false;
+  bool _upiQrEnabled = false;
 
   // ── Multi-printer list (the core new state) ───────────────────────────────
   List<PrinterConfig> _printers = [];
@@ -65,6 +70,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _restaurantNameCtrl.dispose();
     _kotCopiesCtrl.dispose();
     _billCopiesCtrl.dispose();
+    _feedbackQrUrlCtrl.dispose();
+    _upiIdCtrl.dispose();
     super.dispose();
   }
 
@@ -82,10 +89,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _autoPrintBill            = PrintConfig.autoPrintBill;
     _aggregatorAutoKot        = PrintConfig.aggregatorAutoKot;
     _aggregatorAutoBill       = PrintConfig.aggregatorAutoBill;
+    _aggregatorAutoBillStage  = PrintConfig.aggregatorAutoBillStage;
     _scanOrderAutoPrint       = PrintConfig.scanOrderAutoPrint;
     _is80mm                   = PrintConfig.is80mm;
     _usePdfPrintingOnWindows  = PrintConfig.usePdfPrintingOnWindows;
     _showItemDateOn80mm       = PrintConfig.showItemDateOn80mm;
+    _feedbackQrEnabled        = PrintConfig.feedbackQrEnabled;
+    _feedbackQrUrlCtrl.text   = PrintConfig.feedbackQrUrl;
+    _upiQrEnabled             = PrintConfig.upiQrEnabled;
+    _upiIdCtrl.text           = PrintConfig.upiId;
   }
 
   Future<void> _loadSavedPrinters() async {
@@ -109,6 +121,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
 
+    if (_upiQrEnabled && _upiIdCtrl.text.trim().isEmpty) {
+      _showError('UPI ID is required when UPI QR is enabled');
+      return;
+    }
+
     // Write global config to memory
     PrintConfig.restaurantId             = int.tryParse(_restaurantIdCtrl.text) ?? 0;
     PrintConfig.empId                    = _empIdCtrl.text.trim();
@@ -122,10 +139,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     PrintConfig.autoPrintBill            = _autoPrintBill;
     PrintConfig.aggregatorAutoKot        = _aggregatorAutoKot;
     PrintConfig.aggregatorAutoBill       = _aggregatorAutoBill;
+    PrintConfig.aggregatorAutoBillStage  = _aggregatorAutoBillStage;
     PrintConfig.scanOrderAutoPrint       = _scanOrderAutoPrint;
     PrintConfig.is80mm                   = _is80mm;
     PrintConfig.usePdfPrintingOnWindows  = _usePdfPrintingOnWindows;
     PrintConfig.showItemDateOn80mm       = _showItemDateOn80mm;
+    PrintConfig.feedbackQrEnabled        = _feedbackQrEnabled;
+    PrintConfig.feedbackQrUrl            = _feedbackQrUrlCtrl.text.trim();
+    PrintConfig.upiQrEnabled             = _upiQrEnabled;
+    PrintConfig.upiId                    = _upiIdCtrl.text.trim();
 
     // Derive legacy single-printer fields from first printer for backward compat
     final first = _printers.first;
@@ -350,9 +372,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           _toggle(
             label:    'Aggregator Auto Bill',
-            subtitle: 'Print Bill when aggregator order is Acknowledged',
+            subtitle: 'Print Bill when aggregator order reaches selected stage',
             value:    _aggregatorAutoBill,
             onChanged: (v) => setState(() => _aggregatorAutoBill = v),
+          ),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: DropdownButtonFormField<String>(
+                value: _aggregatorAutoBillStage,
+                decoration: const InputDecoration(
+                  labelText: 'Aggregator Auto Bill Stage',
+                  border: InputBorder.none,
+                ),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'Acknowledged',
+                    child: Text('Acknowledged'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'Food Ready',
+                    child: Text('Food Ready'),
+                  ),
+                ],
+                onChanged: (v) {
+                  if (v != null) {
+                    setState(() => _aggregatorAutoBillStage = v);
+                  }
+                },
+              ),
+            ),
           ),
           const SizedBox(height: 16),
 
@@ -364,6 +413,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
             value:    _showItemDateOn80mm,
             onChanged: (v) => setState(() => _showItemDateOn80mm = v),
           ),
+          const SizedBox(height: 16),
+
+          // ── QR Codes (bill only, never on aggregator/KOT) ────────────────
+          _sectionHeader('📱 QR Codes'),
+          _toggle(
+            label:    'UPI Payment QR',
+            subtitle: 'Print a scan-to-pay QR on the bill',
+            value:    _upiQrEnabled,
+            onChanged: (v) => setState(() => _upiQrEnabled = v),
+          ),
+          if (_upiQrEnabled)
+            _field(controller: _upiIdCtrl, label: 'UPI ID',
+                hint: 'restaurant@upi', icon: Icons.qr_code),
+          _toggle(
+            label:    'Feedback QR',
+            subtitle: 'Print a scan-for-feedback QR on the bill',
+            value:    _feedbackQrEnabled,
+            onChanged: (v) => setState(() => _feedbackQrEnabled = v),
+          ),
+          if (_feedbackQrEnabled)
+            _field(controller: _feedbackQrUrlCtrl, label: 'Feedback URL (optional)',
+                hint: 'Leave blank to use the default MyGenie feedback link',
+                icon: Icons.link),
           const SizedBox(height: 32),
 
           // ── Save button ──────────────────────────────────────────────────

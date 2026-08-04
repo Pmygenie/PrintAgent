@@ -804,6 +804,29 @@ class EscPosFormatter {
       );
     }
 
+    // ── QR Codes — bill only, never on aggregator orders ──
+    if (!isAggregator) {
+      final qrSize = PrintConfig.is80mm ? QRSize.size6 : QRSize.size5;
+
+      if (PrintConfig.upiQrEnabled && PrintConfig.upiId.trim().isNotEmpty) {
+        b += g.text(lineDashes,
+            styles: const PosStyles(align: PosAlign.center, bold: true));
+        b += g.qrcode(PrintConfig.upiQrData, size: qrSize,
+            cor: QRCorrection.M);
+        b += g.text('Scan to Pay',
+            styles: const PosStyles(align: PosAlign.center));
+      }
+
+      if (PrintConfig.feedbackQrEnabled) {
+        b += g.text(lineDashes,
+            styles: const PosStyles(align: PosAlign.center, bold: true));
+        b += g.qrcode(PrintConfig.feedbackQrData(o.orderId), size: qrSize,
+            cor: QRCorrection.M);
+        b += g.text('Scan for Feedback',
+            styles: const PosStyles(align: PosAlign.center));
+      }
+    }
+
     // ── Footer ───────────────────────────────────────────
     b += g.text(lineEquals,
         styles: const PosStyles(align: PosAlign.center, bold: true));

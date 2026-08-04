@@ -80,6 +80,16 @@ class PrintStyleController extends GetxController {
     update();
   }
 
+  void updateUpiQrSize(double value) {
+    config.upiQrSizeMm = value;
+    update();
+  }
+
+  void updateFeedbackQrSize(double value) {
+    config.feedbackQrSizeMm = value;
+    update();
+  }
+
  
   Future<void> saveConfig(BuildContext context, VoidCallback onSaved) async {
     await PrintStyleService.saveConfig(config);

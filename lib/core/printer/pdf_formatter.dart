@@ -11,6 +11,7 @@ import 'package:printer_agent/core/services/print_style_service.dart';
 import 'package:printing/printing.dart';
 import 'package:printer_agent/core/profile/restaurant_profile_model.dart';
 import 'package:printer_agent/core/profile/restaurant_profile_service.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import '../config/print_config.dart';
 import '../models/print_job.dart';
 import '../models/restaurant_order.dart';
@@ -103,8 +104,18 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
       case PrintType.bill:
         final restaurantProfile = await RestaurantProfileService.getProfile();
         final logoImage = await _fetchLogoImage(restaurantProfile);
-        pdf.addPage(
-            await _buildBillPage(job.order, restaurantProfile, logoImage));
+        final isAggregator = job.order.billData['is_aggregator'] == true;
+        final upiQrImage = (!isAggregator &&
+                PrintConfig.upiQrEnabled &&
+                PrintConfig.upiId.trim().isNotEmpty)
+            ? await _generateQrImage(PrintConfig.upiQrData)
+            : null;
+        final feedbackQrImage = (!isAggregator && PrintConfig.feedbackQrEnabled)
+            ? await _generateQrImage(
+                PrintConfig.feedbackQrData(job.order.orderId))
+            : null;
+        pdf.addPage(await _buildBillPage(job.order, restaurantProfile,
+            logoImage, upiQrImage, feedbackQrImage));
         break;
     }
 
@@ -181,6 +192,33 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
       }
     } catch (_) {}
     return null;
+  }
+
+  // ── QR code generation ───────────────────────────────────────────
+  /// Rasterises [data] to a 300×300 PNG for embedding via [pw.MemoryImage].
+  /// Returns null if the payload can't be encoded (e.g. too long).
+  static Future<pw.MemoryImage?> _generateQrImage(String data) async {
+    if (data.trim().isEmpty) return null;
+    try {
+      final validation = QrValidator.validate(
+        data: data,
+        version: QrVersions.auto,
+        errorCorrectionLevel: QrErrorCorrectLevel.M,
+      );
+      if (validation.status != QrValidationStatus.valid ||
+          validation.qrCode == null) {
+        return null;
+      }
+      final painter = QrPainter.withQr(
+        qr: validation.qrCode!,
+        gapless: true,
+      );
+      final imageData = await painter.toImageData(300);
+      if (imageData == null) return null;
+      return pw.MemoryImage(imageData.buffer.asUint8List());
+    } catch (_) {
+      return null;
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -537,6 +575,8 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
     RestaurantOrder o,
     RestaurantProfileModel profile,
     pw.MemoryImage? logoImage,
+    pw.MemoryImage? upiQrImage,
+    pw.MemoryImage? feedbackQrImage,
   ) async {
     final bill = o.billData;
     final itemRows = await _billItems(o);
@@ -793,6 +833,34 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
             roomPending,
             grantAmount,
             payLabel(),
+          ),
+        ],
+
+        // ── QR codes — bill only, never on aggregator orders ──
+        if (upiQrImage != null) ...[
+          _simpleDividerOrDotted ? _divider(dashed: true) : buildDottedLine(180),
+          pw.SizedBox(height: 4),
+          pw.Center(
+            child: pw.Image(upiQrImage,
+                width: _style.upiQrSizeMm * PdfPageFormat.mm,
+                height: _style.upiQrSizeMm * PdfPageFormat.mm),
+          ),
+          pw.Center(
+            child: pw.Text('Scan to Pay',
+                style: _text(size: _footerSize, bold: _footerBold)),
+          ),
+        ],
+        if (feedbackQrImage != null) ...[
+          _simpleDividerOrDotted ? _divider(dashed: true) : buildDottedLine(180),
+          pw.SizedBox(height: 4),
+          pw.Center(
+            child: pw.Image(feedbackQrImage,
+                width: _style.feedbackQrSizeMm * PdfPageFormat.mm,
+                height: _style.feedbackQrSizeMm * PdfPageFormat.mm),
+          ),
+          pw.Center(
+            child: pw.Text('Scan for Feedback',
+                style: _text(size: _footerSize, bold: _footerBold)),
           ),
         ],
 

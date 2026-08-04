@@ -86,6 +86,10 @@ class PrintStyleConfig {
   double logoWidthMm;
   double logoHeightMm;
 
+  // QR code size (mm) — applied to bill prints only (Windows PDF path)
+  double upiQrSizeMm;
+  double feedbackQrSizeMm;
+
   PrintStyleConfig({
     required this.restaurantName,
     required this.restaurantAddress,
@@ -127,6 +131,8 @@ class PrintStyleConfig {
     this.marginRightMm = 0.0,
     this.logoWidthMm = 30.0,
     this.logoHeightMm = 30.0,
+    this.upiQrSizeMm = 25.0,
+    this.feedbackQrSizeMm = 25.0,
   });
 
   factory PrintStyleConfig.defaults() {
@@ -223,6 +229,8 @@ class PrintStyleConfig {
         'marginRightMm': marginRightMm,
         'logoWidthMm': logoWidthMm,
         'logoHeightMm': logoHeightMm,
+        'upiQrSizeMm': upiQrSizeMm,
+        'feedbackQrSizeMm': feedbackQrSizeMm,
       };
 
   factory PrintStyleConfig.fromJson(Map<String, dynamic> json) {
@@ -273,6 +281,9 @@ class PrintStyleConfig {
       marginRightMm: (json['marginRightMm'] as num?)?.toDouble() ?? 0.0,
       logoWidthMm: (json['logoWidthMm'] as num?)?.toDouble() ?? 30.0,
       logoHeightMm: (json['logoHeightMm'] as num?)?.toDouble() ?? 30.0,
+      upiQrSizeMm: (json['upiQrSizeMm'] as num?)?.toDouble() ?? 25.0,
+      feedbackQrSizeMm:
+          (json['feedbackQrSizeMm'] as num?)?.toDouble() ?? 25.0,
     );
   }
 }
