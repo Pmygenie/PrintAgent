@@ -935,10 +935,13 @@ class WindowsSocketService {
     final printBillStatus =
         orderMap['print_bill_status']?.toString().trim() ?? '';
 
-    if (billingAuto != 'Yes' || printBillStatus != 'Yes') {
+    if (!PrintConfig.autoSettle ||
+        billingAuto != 'Yes' ||
+        printBillStatus != 'Yes') {
       _log(
         '⏩ Socket auto-bill skipped '
-        '(billing_auto_bill_print=$billingAuto, print_bill_status=$printBillStatus) '
+        '(autoSettle=${PrintConfig.autoSettle}, '
+        'billing_auto_bill_print=$billingAuto, print_bill_status=$printBillStatus) '
         '#${order.displayOrderId}',
       );
       return;

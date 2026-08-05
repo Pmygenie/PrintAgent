@@ -1,4 +1,5 @@
 class OrderItem {
+  final int? foodId;
   final String name;
   final double quantity;
   final String itemUnit;
@@ -15,6 +16,7 @@ class OrderItem {
   final DateTime? createdAt;
 
   const OrderItem({
+    this.foodId,
     required this.name,
     required this.quantity,
     this.itemUnit = '',
@@ -30,6 +32,55 @@ class OrderItem {
     this.itemUnitPrice = 0.0,
     this.createdAt,
   });
+
+  OrderItem copyWith({double? quantity}) {
+    return OrderItem(
+      foodId: foodId,
+      name: name,
+      quantity: quantity ?? this.quantity,
+      itemUnit: itemUnit,
+      price: price,
+      note: note,
+      station: station,
+      complementary: complementary,
+      variations: variations,
+      addons: addons,
+      variationTotal: variationTotal,
+      addonTotal: addonTotal,
+      foodStatus: foodStatus,
+      itemUnitPrice: itemUnitPrice,
+      createdAt: createdAt,
+    );
+  }
+
+  /// Bill-only: merge rows with same food, variation, and add-ons.
+  static List<OrderItem> mergedForBill(List<OrderItem> items) {
+    final merged = <String, OrderItem>{};
+    final order = <String>[];
+
+    for (final item in items) {
+      final key = _billMergeKey(item);
+      final existing = merged[key];
+      if (existing != null) {
+        merged[key] = existing.copyWith(
+          quantity: existing.quantity + item.quantity,
+        );
+      } else {
+        merged[key] = item;
+        order.add(key);
+      }
+    }
+
+    return order.map((key) => merged[key]!).toList();
+  }
+
+  static String _billMergeKey(OrderItem item) {
+    final foodKey =
+        item.foodId != null ? 'id:${item.foodId}' : 'name:${item.name}';
+    final varKey = item.variations.join('|');
+    final addonKey = item.addons.join('|');
+    return '$foodKey::$varKey::$addonKey';
+  }
 
   static String _normalizeUnit(dynamic raw) {
     final text = (raw ?? '').toString().trim();
@@ -109,6 +160,9 @@ class OrderItem {
     final foodUnit = _normalizeUnit(food['item_unit']);
 
     return OrderItem(
+      foodId: food['id'] is int
+          ? food['id'] as int
+          : int.tryParse(food['id']?.toString() ?? ''),
       name: food['name']?.toString() ?? 'Unknown Item',
       quantity: double.tryParse(
             detail['quantity']?.toString() ?? '1',

@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:printer_agent/core/config/print_config.dart';
+import 'package:printer_agent/core/models/order_item.dart';
 import 'package:printer_agent/core/models/print_style_config.dart';
 import 'package:printer_agent/core/models/restaurant_order.dart';
 import 'package:printer_agent/core/profile/restaurant_profile_model.dart';
@@ -131,7 +132,7 @@ class BillRenderer {
     final rowStyle = canvas.styleFor(style.billTableContent);
     final metaStyle = canvas.styleFor(style.billTableMeta);
 
-    for (final item in order.items) {
+    for (final item in OrderItem.mergedForBill(order.items)) {
       if (item.foodStatus == 3) continue;
 
       final unitPrice = ReceiptBusinessLogic.itemUnitPrice(item);

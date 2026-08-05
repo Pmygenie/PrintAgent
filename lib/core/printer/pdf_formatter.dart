@@ -13,6 +13,7 @@ import 'package:printer_agent/core/profile/restaurant_profile_model.dart';
 import 'package:printer_agent/core/profile/restaurant_profile_service.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../config/print_config.dart';
+import '../models/order_item.dart';
 import '../models/print_job.dart';
 import '../models/restaurant_order.dart';
 
@@ -108,7 +109,8 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
         final upiQrImage = (!isAggregator &&
                 PrintConfig.upiQrEnabled &&
                 PrintConfig.upiId.trim().isNotEmpty)
-            ? await _generateQrImage(PrintConfig.upiQrData)
+            ? await _generateQrImage(
+                PrintConfig.upiQrDataForBill(job.order.billData))
             : null;
         final feedbackQrImage = (!isAggregator && PrintConfig.feedbackQrEnabled)
             ? await _generateQrImage(
@@ -1375,7 +1377,7 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
     final contentStyle = _text(size: textSize, bold: textbold);
     final metaStyle = _text(size: metaSize, bold: metaBold);
 
-    for (final item in o.items) {
+    for (final item in OrderItem.mergedForBill(o.items)) {
       if (item.foodStatus == 3) continue;
 
       final isComp = item.complementary?.toString().toLowerCase() == 'yes';

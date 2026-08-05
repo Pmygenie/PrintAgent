@@ -39,6 +39,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // ── Global print toggles ─────────────────────────────────────────────────
   bool _autoPrint     = true;
   bool _autoPrintBill = true;
+  bool _autoSettle = false;
   bool _aggregatorAutoKot  = false;
   bool _aggregatorAutoBill = false;
   String _aggregatorAutoBillStage = 'Acknowledged';
@@ -49,6 +50,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _showItemDateOn80mm = false;
   bool _feedbackQrEnabled = false;
   bool _upiQrEnabled = false;
+  bool _upiDynamicEnabled = false;
 
   // ── Multi-printer list (the core new state) ───────────────────────────────
   List<PrinterConfig> _printers = [];
@@ -87,6 +89,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _billCopiesCtrl.text      = PrintConfig.billCopies.toString();
     _autoPrint                = PrintConfig.autoPrint;
     _autoPrintBill            = PrintConfig.autoPrintBill;
+    _autoSettle               = PrintConfig.autoSettle;
     _aggregatorAutoKot        = PrintConfig.aggregatorAutoKot;
     _aggregatorAutoBill       = PrintConfig.aggregatorAutoBill;
     _aggregatorAutoBillStage  = PrintConfig.aggregatorAutoBillStage;
@@ -97,6 +100,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _feedbackQrEnabled        = PrintConfig.feedbackQrEnabled;
     _feedbackQrUrlCtrl.text   = PrintConfig.feedbackQrUrl;
     _upiQrEnabled             = PrintConfig.upiQrEnabled;
+    _upiDynamicEnabled        = PrintConfig.upiDynamicEnabled;
     _upiIdCtrl.text           = PrintConfig.upiId;
   }
 
@@ -137,6 +141,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     PrintConfig.billCopies               = int.tryParse(_billCopiesCtrl.text) ?? 1;
     PrintConfig.autoPrint                = _autoPrint;
     PrintConfig.autoPrintBill            = _autoPrintBill;
+    PrintConfig.autoSettle               = _autoSettle;
     PrintConfig.aggregatorAutoKot        = _aggregatorAutoKot;
     PrintConfig.aggregatorAutoBill       = _aggregatorAutoBill;
     PrintConfig.aggregatorAutoBillStage  = _aggregatorAutoBillStage;
@@ -147,6 +152,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     PrintConfig.feedbackQrEnabled        = _feedbackQrEnabled;
     PrintConfig.feedbackQrUrl            = _feedbackQrUrlCtrl.text.trim();
     PrintConfig.upiQrEnabled             = _upiQrEnabled;
+    PrintConfig.upiDynamicEnabled        = _upiDynamicEnabled;
     PrintConfig.upiId                    = _upiIdCtrl.text.trim();
 
     // Derive legacy single-printer fields from first printer for backward compat
@@ -355,6 +361,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: (v) => setState(() => _autoPrintBill = v),
           ),
           _toggle(
+            label:    'Auto Settle',
+            subtitle: 'Print bill on new-order when billing_auto_bill_print and print_bill_status are Yes',
+            value:    _autoSettle,
+            onChanged: (v) => setState(() => _autoSettle = v),
+          ),
+          _toggle(
             label:    'Scan Order Auto Print',
             subtitle: 'Print KOT automatically for scanned (scan-new-order) orders',
             value:    _scanOrderAutoPrint,
@@ -424,8 +436,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: (v) => setState(() => _upiQrEnabled = v),
           ),
           if (_upiQrEnabled)
-            _field(controller: _upiIdCtrl, label: 'UPI ID',
-                hint: 'restaurant@upi', icon: Icons.qr_code),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _upiIdCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'UPI ID',
+                        hintText: 'restaurant@upi',
+                        prefixIcon: Icon(Icons.qr_code),
+                        border: OutlineInputBorder(),
+                        filled: true,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('Dynamic', style: TextStyle(fontSize: 11)),
+                      Switch(
+                        value: _upiDynamicEnabled,
+                        onChanged: (v) =>
+                            setState(() => _upiDynamicEnabled = v),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
           _toggle(
             label:    'Feedback QR',
             subtitle: 'Print a scan-for-feedback QR on the bill',

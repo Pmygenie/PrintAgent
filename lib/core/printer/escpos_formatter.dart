@@ -182,6 +182,7 @@ import 'package:printer_agent/core/profile/restaurant_profile_model.dart';
 import 'package:printer_agent/core/profile/restaurant_profile_service.dart';
 import 'package:printer_agent/core/services/print_style_service.dart';
 import '../models/print_job.dart';
+import '../models/order_item.dart';
 import '../models/restaurant_order.dart';
 import '../config/print_config.dart';
 
@@ -483,7 +484,7 @@ class EscPosFormatter {
         styles: const PosStyles(align: PosAlign.center, bold: true));
 
     // ── Items loop ── complementary + variations + add-ons
-    for (final item in o.items) {
+    for (final item in OrderItem.mergedForBill(o.items)) {
       if (item.foodStatus == 3) continue;
 
       final double unitPrice =
@@ -811,7 +812,7 @@ class EscPosFormatter {
       if (PrintConfig.upiQrEnabled && PrintConfig.upiId.trim().isNotEmpty) {
         b += g.text(lineDashes,
             styles: const PosStyles(align: PosAlign.center, bold: true));
-        b += g.qrcode(PrintConfig.upiQrData, size: qrSize,
+        b += g.qrcode(PrintConfig.upiQrDataForBill(bill), size: qrSize,
             cor: QRCorrection.M);
         b += g.text('Scan to Pay',
             styles: const PosStyles(align: PosAlign.center));

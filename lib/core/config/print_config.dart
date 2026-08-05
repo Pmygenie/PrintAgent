@@ -198,6 +198,7 @@ class PrintConfig {
   static int kotCopies = 1;
   static int billCopies = 1;
   static bool autoPrintBill = true;
+  static bool autoSettle = false;
   static bool aggregatorAutoKot = false;
   static bool aggregatorAutoBill = false;
   static String aggregatorAutoBillStage = 'Acknowledged';
@@ -229,6 +230,7 @@ class PrintConfig {
   static bool feedbackQrEnabled = false;
   static String feedbackQrUrl = '';
   static bool upiQrEnabled = false;
+  static bool upiDynamicEnabled = false;
   static String upiId = '';
 
   // ── Helpers ───────────────────────────────────────────
@@ -242,8 +244,23 @@ class PrintConfig {
         : 'https://order.mygenie.online/feedback?orderId=$orderId';
   }
 
-  /// UPI payment QR payload — static amount (customer enters amount).
-  static String get upiQrData => 'upi://pay?pa=$upiId&pn=&am=0&tn=';
+  /// UPI payment QR payload — static (`am=0`) or dynamic (bill total in `am`).
+  static String upiQrDataForBill(Map<String, dynamic> bill) {
+    double d(String key) =>
+        double.tryParse(bill[key]?.toString() ?? '0') ?? 0.0;
+
+    final grantAmount = d('grant_amount');
+    final paymentAmount = d('payment_amount');
+    final associatedOrders = bill['associated_orders'] as List<dynamic>?;
+    final isRoomOrder =
+        associatedOrders != null && associatedOrders.isNotEmpty;
+    // final totalAmount = isRoomOrder ? paymentAmount : grantAmount;
+    final totalAmount =  grantAmount;
+
+
+    final amount = upiDynamicEnabled ? totalAmount.toStringAsFixed(2) : '0';
+    return 'upi://pay?pa=$upiId&pn=&am=$amount&tn=';
+  }
 
   static bool matchesStation(String socketStation) => stations
       .any((s) => s.trim().toUpperCase() == socketStation.trim().toUpperCase());
@@ -253,6 +270,7 @@ class PrintConfig {
     final p = await SharedPreferences.getInstance();
     autoPrint = p.getBool('autoPrint') ?? true;
     autoPrintBill = p.getBool('autoPrintBill') ?? true;
+    autoSettle = p.getBool('autoSettle') ?? false;
     aggregatorAutoKot = p.getBool('aggregatorAutoKot') ?? false;
     aggregatorAutoBill = p.getBool('aggregatorAutoBill') ?? false;
     aggregatorAutoBillStage =
@@ -302,6 +320,7 @@ class PrintConfig {
     feedbackQrEnabled = p.getBool('feedbackQrEnabled') ?? false;
     feedbackQrUrl = p.getString('feedbackQrUrl') ?? '';
     upiQrEnabled = p.getBool('upiQrEnabled') ?? false;
+    upiDynamicEnabled = p.getBool('upiDynamicEnabled') ?? false;
     upiId = p.getString('upiId') ?? '';
   }
 
@@ -310,6 +329,7 @@ class PrintConfig {
     final p = await SharedPreferences.getInstance();
     await p.setBool('autoPrint', autoPrint);
     await p.setBool('autoPrintBill', autoPrintBill);
+    await p.setBool('autoSettle', autoSettle);
     await p.setBool('aggregatorAutoKot', aggregatorAutoKot);
     await p.setBool('aggregatorAutoBill', aggregatorAutoBill);
     await p.setString('aggregatorAutoBillStage', aggregatorAutoBillStage);
@@ -341,6 +361,7 @@ class PrintConfig {
     await p.setBool('feedbackQrEnabled', feedbackQrEnabled);
     await p.setString('feedbackQrUrl', feedbackQrUrl);
     await p.setBool('upiQrEnabled', upiQrEnabled);
+    await p.setBool('upiDynamicEnabled', upiDynamicEnabled);
     await p.setString('upiId', upiId);
   }
 
