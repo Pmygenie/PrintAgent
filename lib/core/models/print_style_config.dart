@@ -1,27 +1,47 @@
-import 'dart:convert';
-
 class PrintStyleItem {
+  // Windows PDF point sizes and weight.
   double size58;
   double size80;
   bool isBold;
+
+  // Android ESC/POS character scale (1-8) and weight.
+  int escSize58;
+  int escSize80;
+  bool escBold;
 
   PrintStyleItem({
     required this.size58,
     required this.size80,
     required this.isBold,
+    this.escSize58 = 1,
+    this.escSize80 = 1,
+    this.escBold = false,
   });
 
   Map<String, dynamic> toJson() => {
         'size58': size58,
         'size80': size80,
         'isBold': isBold,
+        'escSize58': escSize58,
+        'escSize80': escSize80,
+        'escBold': escBold,
       };
 
-  factory PrintStyleItem.fromJson(Map<String, dynamic> json) {
+  factory PrintStyleItem.fromJson(
+    Map<String, dynamic> json, {
+    PrintStyleItem? fallback,
+  }) {
+    int escSize(String key, int defaultValue) {
+      return ((json[key] as num?)?.toInt() ?? defaultValue).clamp(1, 8);
+    }
+
     return PrintStyleItem(
-      size58: (json['size58'] as num?)?.toDouble() ?? 10.0,
-      size80: (json['size80'] as num?)?.toDouble() ?? 10.0,
-      isBold: json['isBold'] as bool? ?? false,
+      size58: (json['size58'] as num?)?.toDouble() ?? fallback?.size58 ?? 10.0,
+      size80: (json['size80'] as num?)?.toDouble() ?? fallback?.size80 ?? 10.0,
+      isBold: json['isBold'] as bool? ?? fallback?.isBold ?? false,
+      escSize58: escSize('escSize58', fallback?.escSize58 ?? 1),
+      escSize80: escSize('escSize80', fallback?.escSize80 ?? 1),
+      escBold: json['escBold'] as bool? ?? fallback?.escBold ?? false,
     );
   }
 }
@@ -90,6 +110,11 @@ class PrintStyleConfig {
   double upiQrSizeMm;
   double feedbackQrSizeMm;
 
+  // Android ESC/POS media sizes (shared by 58mm and 80mm).
+  double escLogoSizeMm;
+  double escUpiQrSizeMm;
+  double escFeedbackQrSizeMm;
+
   PrintStyleConfig({
     required this.restaurantName,
     required this.restaurantAddress,
@@ -133,54 +158,97 @@ class PrintStyleConfig {
     this.logoHeightMm = 30.0,
     this.upiQrSizeMm = 25.0,
     this.feedbackQrSizeMm = 25.0,
+    this.escLogoSizeMm = 30.0,
+    this.escUpiQrSizeMm = 25.0,
+    this.escFeedbackQrSizeMm = 25.0,
   });
 
   factory PrintStyleConfig.defaults() {
     return PrintStyleConfig(
       // BILL HEADERS
-      restaurantName: PrintStyleItem(size58: 11, size80: 14, isBold: true),
+      restaurantName: PrintStyleItem(
+        size58: 11,
+        size80: 14,
+        isBold: true,
+        escSize58: 2,
+        escSize80: 2,
+        escBold: true,
+      ),
       restaurantAddress: PrintStyleItem(size58: 6, size80: 7, isBold: false),
       restaurantPhone: PrintStyleItem(size58: 6, size80: 7, isBold: false),
       restaurantGst: PrintStyleItem(size58: 6, size80: 7, isBold: false),
       restaurantFssai: PrintStyleItem(size58: 6, size80: 7, isBold: false),
 
       // BILL INFO
-      billInfoRow1: PrintStyleItem(size58: 6, size80: 7, isBold: false),
-      billInfoRow2: PrintStyleItem(size58: 6, size80: 7, isBold: false),
-      billInfoRow3: PrintStyleItem(size58: 6, size80: 7, isBold: false),
-      billInfoRow4: PrintStyleItem(size58: 6, size80: 7, isBold: false),
+      billInfoRow1:
+          PrintStyleItem(size58: 6, size80: 7, isBold: false, escBold: true),
+      billInfoRow2:
+          PrintStyleItem(size58: 6, size80: 7, isBold: false, escBold: true),
+      billInfoRow3:
+          PrintStyleItem(size58: 6, size80: 7, isBold: false, escBold: true),
+      billInfoRow4:
+          PrintStyleItem(size58: 6, size80: 7, isBold: false, escBold: true),
 
       // BILL TABLE
-      billTableHeader: PrintStyleItem(size58: 7, size80: 8, isBold: true),
+      billTableHeader:
+          PrintStyleItem(size58: 7, size80: 8, isBold: true, escBold: true),
       billTableContent: PrintStyleItem(size58: 7, size80: 8, isBold: false),
       billTableQty: PrintStyleItem(size58: 7, size80: 8, isBold: false),
       billTableMeta: PrintStyleItem(size58: 6, size80: 7, isBold: false),
-      orderNote: PrintStyleItem(size58: 7, size80: 8, isBold: true),
+      orderNote:
+          PrintStyleItem(size58: 7, size80: 8, isBold: true, escBold: true),
 
       // BILL TOTALS
       billAmountLine: PrintStyleItem(size58: 6, size80: 7, isBold: false),
-      billTotal: PrintStyleItem(size58: 7, size80: 8, isBold: true),
-      billGrandTotal: PrintStyleItem(size58:7 , size80: 8, isBold: true),
-      billPaidBy: PrintStyleItem(size58: 5.5, size80: 6.5, isBold: false),
+      billTotal:
+          PrintStyleItem(size58: 7, size80: 8, isBold: true, escBold: true),
+      billGrandTotal:
+          PrintStyleItem(size58: 7, size80: 8, isBold: true, escBold: true),
+      billPaidBy: PrintStyleItem(
+          size58: 5.5, size80: 6.5, isBold: false, escBold: true),
 
       // DELIVERY & ROOM
-      deliveryHeader: PrintStyleItem(size58: 6, size80: 7, isBold: false),
-      deliveryContent: PrintStyleItem(size58: 6, size80: 7, isBold: true),
-      roomHeader: PrintStyleItem(size58: 6, size80: 7, isBold: true),
+      deliveryHeader:
+          PrintStyleItem(size58: 6, size80: 7, isBold: false, escBold: true),
+      deliveryContent:
+          PrintStyleItem(size58: 6, size80: 7, isBold: true, escBold: false),
+      roomHeader:
+          PrintStyleItem(size58: 6, size80: 7, isBold: true, escBold: true),
       roomContent: PrintStyleItem(size58: 6, size80: 7, isBold: false),
 
       footer: PrintStyleItem(size58: 6, size80: 7, isBold: false),
 
       // KOT
-      kotTitle: PrintStyleItem(size58: 11, size80: 14, isBold: true),
-      cancelKotTitle: PrintStyleItem(size58: 9, size80: 14, isBold: true),
-      kotOrderInfo1: PrintStyleItem(size58: 6, size80: 7, isBold: false),
-      kotOrderInfo2: PrintStyleItem(size58: 6, size80: 7, isBold: false),
-      kotOrderInfo3: PrintStyleItem(size58: 6, size80: 7, isBold: false),
-      kotOrderInfo4: PrintStyleItem(size58: 6, size80: 7, isBold: false),
-      kotTableHeader: PrintStyleItem(size58: 6, size80: 7, isBold: true),
-      kotTableContent: PrintStyleItem(size58: 6, size80: 7, isBold: false),
-      kotNote: PrintStyleItem(size58: 6, size80: 7, isBold: true),
+      kotTitle: PrintStyleItem(
+        size58: 11,
+        size80: 14,
+        isBold: true,
+        escSize58: 2,
+        escSize80: 2,
+        escBold: true,
+      ),
+      cancelKotTitle: PrintStyleItem(
+        size58: 9,
+        size80: 14,
+        isBold: true,
+        escSize58: 2,
+        escSize80: 2,
+        escBold: true,
+      ),
+      kotOrderInfo1:
+          PrintStyleItem(size58: 6, size80: 7, isBold: false, escBold: true),
+      kotOrderInfo2:
+          PrintStyleItem(size58: 6, size80: 7, isBold: false, escBold: true),
+      kotOrderInfo3:
+          PrintStyleItem(size58: 6, size80: 7, isBold: false, escBold: true),
+      kotOrderInfo4:
+          PrintStyleItem(size58: 6, size80: 7, isBold: false, escBold: true),
+      kotTableHeader:
+          PrintStyleItem(size58: 6, size80: 7, isBold: true, escBold: true),
+      kotTableContent:
+          PrintStyleItem(size58: 6, size80: 7, isBold: false, escBold: true),
+      kotNote:
+          PrintStyleItem(size58: 6, size80: 7, isBold: true, escBold: true),
 
       //Universal
       fontFamily: 'Montserrat',
@@ -231,12 +299,20 @@ class PrintStyleConfig {
         'logoHeightMm': logoHeightMm,
         'upiQrSizeMm': upiQrSizeMm,
         'feedbackQrSizeMm': feedbackQrSizeMm,
+        'escLogoSizeMm': escLogoSizeMm,
+        'escUpiQrSizeMm': escUpiQrSizeMm,
+        'escFeedbackQrSizeMm': escFeedbackQrSizeMm,
       };
 
   factory PrintStyleConfig.fromJson(Map<String, dynamic> json) {
     final def = PrintStyleConfig.defaults();
     PrintStyleItem parseItem(String key, PrintStyleItem fallback) {
-      if (json[key] != null) return PrintStyleItem.fromJson(json[key]);
+      if (json[key] is Map) {
+        return PrintStyleItem.fromJson(
+          Map<String, dynamic>.from(json[key] as Map),
+          fallback: fallback,
+        );
+      }
       return fallback;
     }
 
@@ -282,8 +358,23 @@ class PrintStyleConfig {
       logoWidthMm: (json['logoWidthMm'] as num?)?.toDouble() ?? 30.0,
       logoHeightMm: (json['logoHeightMm'] as num?)?.toDouble() ?? 30.0,
       upiQrSizeMm: (json['upiQrSizeMm'] as num?)?.toDouble() ?? 25.0,
-      feedbackQrSizeMm:
-          (json['feedbackQrSizeMm'] as num?)?.toDouble() ?? 25.0,
+      feedbackQrSizeMm: (json['feedbackQrSizeMm'] as num?)?.toDouble() ?? 25.0,
+      escLogoSizeMm: (json['escLogoSizeMm'] as num?)?.toDouble() ??
+          (json['logoWidthMm'] as num?)?.toDouble() ??
+          def.escLogoSizeMm,
+      escUpiQrSizeMm:
+          _escQrSizeMm(json['escUpiQrSizeMm'], def.escUpiQrSizeMm),
+      escFeedbackQrSizeMm:
+          _escQrSizeMm(json['escFeedbackQrSizeMm'], def.escFeedbackQrSizeMm),
     );
+  }
+
+  /// Older configs stored a 1–8 ESC/POS module size under these keys. Such a
+  /// value is far too small to be a millimetre size, so fall back to the
+  /// default instead of printing a QR a few millimetres wide.
+  static double _escQrSizeMm(dynamic raw, double fallback) {
+    final value = (raw as num?)?.toDouble();
+    if (value == null || value < 10.0) return fallback;
+    return value;
   }
 }

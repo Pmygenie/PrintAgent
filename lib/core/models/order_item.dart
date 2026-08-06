@@ -54,11 +54,15 @@ class OrderItem {
   }
 
   /// Bill-only: merge rows with same food, variation, and add-ons.
+  /// Cancelled rows are dropped first so they cannot alter a surviving line's
+  /// quantity or status.
   static List<OrderItem> mergedForBill(List<OrderItem> items) {
     final merged = <String, OrderItem>{};
     final order = <String>[];
 
     for (final item in items) {
+      if (item.foodStatus == 3) continue;
+
       final key = _billMergeKey(item);
       final existing = merged[key];
       if (existing != null) {
@@ -79,7 +83,10 @@ class OrderItem {
         item.foodId != null ? 'id:${item.foodId}' : 'name:${item.name}';
     final varKey = item.variations.join('|');
     final addonKey = item.addons.join('|');
-    return '$foodKey::$varKey::$addonKey';
+    final compKey =
+        item.complementary?.toLowerCase() == 'yes' ? 'comp' : 'paid';
+    final priceKey = item.price.toStringAsFixed(2);
+    return '$foodKey::$varKey::$addonKey::$compKey::$priceKey';
   }
 
   static String _normalizeUnit(dynamic raw) {

@@ -40,6 +40,36 @@ class PrintStyleController extends GetxController {
     update();
   }
 
+  void updateEscSize58(PrintStyleItem item, int value) {
+    item.escSize58 = value.clamp(1, 8);
+    update();
+  }
+
+  void updateEscSize80(PrintStyleItem item, int value) {
+    item.escSize80 = value.clamp(1, 8);
+    update();
+  }
+
+  void updateEscBold(PrintStyleItem item, bool value) {
+    item.escBold = value;
+    update();
+  }
+
+  void updateEscLogoSize(double value) {
+    config.escLogoSizeMm = value;
+    update();
+  }
+
+  void updateEscUpiQrSize(double value) {
+    config.escUpiQrSizeMm = value.clamp(10.0, 45.0);
+    update();
+  }
+
+  void updateEscFeedbackQrSize(double value) {
+    config.escFeedbackQrSizeMm = value.clamp(10.0, 45.0);
+    update();
+  }
+
   void updateFontFamily(String value) {
     config.fontFamily = value;
     update();
@@ -90,16 +120,16 @@ class PrintStyleController extends GetxController {
     update();
   }
 
- 
   Future<void> saveConfig(BuildContext context, VoidCallback onSaved) async {
     await PrintStyleService.saveConfig(config);
-    
+
     // Trigger the socket reconnect on the HomeScreen
-    onSaved(); 
+    onSaved();
 
     // Show success message
     Get.snackbar(
-      '', '', 
+      '',
+      '',
       titleText: const Text(
         '✅ Styles saved — reconnecting socket...',
         style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
@@ -112,7 +142,7 @@ class PrintStyleController extends GetxController {
     // Wait 1 second, then pop using native Navigator
     await Future.delayed(const Duration(seconds: 1));
     if (context.mounted) {
-      Navigator.pop(context); 
+      Navigator.pop(context);
     }
   }
 
@@ -122,6 +152,4 @@ class PrintStyleController extends GetxController {
     update();
     Get.snackbar('Reset', 'Restored to default styles.');
   }
-
-  
 }

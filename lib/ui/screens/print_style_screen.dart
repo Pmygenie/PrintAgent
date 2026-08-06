@@ -288,6 +288,24 @@ class PrintStyleScreen extends StatelessWidget {
                 ],
               ),
 
+              const Padding(
+                padding: EdgeInsets.only(top: 32.0, bottom: 8.0),
+                child: Text(
+                  'ANDROID ESC/POS SETTINGS',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold, color: Colors.grey),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.only(bottom: 8.0),
+                child: Text(
+                  'Android thermal printers support character sizes 1–8. '
+                  'The 58mm and 80mm settings are independent.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ),
+              ..._buildAndroidStyleSections(c, ctrl),
+
               const SizedBox(height: 32),
             ],
           );
@@ -314,6 +332,188 @@ class PrintStyleScreen extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  List<Widget> _buildAndroidStyleSections(
+      PrintStyleConfig c, PrintStyleController ctrl) {
+    return [
+      Card(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Android Global Settings',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 12),
+              _buildMarginField(
+                label: 'Logo Size',
+                value: c.escLogoSizeMm,
+                onChanged: ctrl.updateEscLogoSize,
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildMarginField(
+                      label: 'UPI QR Size',
+                      value: c.escUpiQrSizeMm,
+                      onChanged: ctrl.updateEscUpiQrSize,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildMarginField(
+                      label: 'Feedback QR Size',
+                      value: c.escFeedbackQrSizeMm,
+                      onChanged: ctrl.updateEscFeedbackQrSize,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+      ExpansionTile(
+        title: const Text('Android Restaurant Header'),
+        children: [
+          _buildAndroidStyleRow('Restaurant Name', c.restaurantName, ctrl),
+          _buildAndroidStyleRow(
+              'Restaurant Address', c.restaurantAddress, ctrl),
+          _buildAndroidStyleRow('Restaurant Phone', c.restaurantPhone, ctrl),
+          _buildAndroidStyleRow('GST', c.restaurantGst, ctrl),
+          _buildAndroidStyleRow('FSSAI', c.restaurantFssai, ctrl),
+        ],
+      ),
+      ExpansionTile(
+        title: const Text('Android Bill Information'),
+        children: [
+          _buildAndroidStyleRow('Bill Info Row 1', c.billInfoRow1, ctrl),
+          _buildAndroidStyleRow('Bill Info Row 2', c.billInfoRow2, ctrl),
+          _buildAndroidStyleRow('Bill Info Row 3', c.billInfoRow3, ctrl),
+          _buildAndroidStyleRow('Bill Info Row 4', c.billInfoRow4, ctrl),
+        ],
+      ),
+      ExpansionTile(
+        title: const Text('Android Bill Table'),
+        children: [
+          _buildAndroidStyleRow('Table Header', c.billTableHeader, ctrl),
+          _buildAndroidStyleRow('Table Content', c.billTableContent, ctrl),
+          _buildAndroidStyleRow('Table Qty', c.billTableQty, ctrl),
+          _buildAndroidStyleRow('Table Meta', c.billTableMeta, ctrl),
+          _buildAndroidStyleRow('Order Note', c.orderNote, ctrl),
+        ],
+      ),
+      ExpansionTile(
+        title: const Text('Android Amount Section'),
+        children: [
+          _buildAndroidStyleRow('Amount Breakdown', c.billAmountLine, ctrl),
+          _buildAndroidStyleRow('Total', c.billTotal, ctrl),
+          _buildAndroidStyleRow('Grand Total', c.billGrandTotal, ctrl),
+          _buildAndroidStyleRow('Paid By', c.billPaidBy, ctrl),
+        ],
+      ),
+      ExpansionTile(
+        title: const Text('Android Delivery and Room'),
+        children: [
+          _buildAndroidStyleRow('Delivery Header', c.deliveryHeader, ctrl),
+          _buildAndroidStyleRow('Delivery Content', c.deliveryContent, ctrl),
+          _buildAndroidStyleRow('Room Header', c.roomHeader, ctrl),
+          _buildAndroidStyleRow('Room Content', c.roomContent, ctrl),
+          _buildAndroidStyleRow('Footer Text', c.footer, ctrl),
+        ],
+      ),
+      ExpansionTile(
+        title: const Text('Android KOT'),
+        children: [
+          _buildAndroidStyleRow('KOT Title', c.kotTitle, ctrl),
+          _buildAndroidStyleRow('Cancel KOT Title', c.cancelKotTitle, ctrl),
+          _buildAndroidStyleRow('Order Info Row 1', c.kotOrderInfo1, ctrl),
+          _buildAndroidStyleRow('Order Info Row 2', c.kotOrderInfo2, ctrl),
+          _buildAndroidStyleRow('Order Info Row 3', c.kotOrderInfo3, ctrl),
+          _buildAndroidStyleRow('Order Info Row 4', c.kotOrderInfo4, ctrl),
+          _buildAndroidStyleRow('Table Header', c.kotTableHeader, ctrl),
+          _buildAndroidStyleRow('Table Content', c.kotTableContent, ctrl),
+          _buildAndroidStyleRow('Note', c.kotNote, ctrl),
+        ],
+      ),
+    ];
+  }
+
+  Widget _buildAndroidStyleRow(
+      String label, PrintStyleItem item, PrintStyleController ctrl) {
+    final sizes = List<int>.generate(8, (index) => index + 1);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<int>(
+                  value: item.escSize58,
+                  decoration: const InputDecoration(
+                    labelText: '58mm Size',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  items: sizes
+                      .map((size) => DropdownMenuItem<int>(
+                            value: size,
+                            child: Text('$size'),
+                          ))
+                      .toList(),
+                  onChanged: (value) {
+                    if (value != null) ctrl.updateEscSize58(item, value);
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: DropdownButtonFormField<int>(
+                  value: item.escSize80,
+                  decoration: const InputDecoration(
+                    labelText: '80mm Size',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  items: sizes
+                      .map((size) => DropdownMenuItem<int>(
+                            value: size,
+                            child: Text('$size'),
+                          ))
+                      .toList(),
+                  onChanged: (value) {
+                    if (value != null) ctrl.updateEscSize80(item, value);
+                  },
+                ),
+              ),
+              const SizedBox(width: 12),
+              Column(
+                children: [
+                  const Text('Bold', style: TextStyle(fontSize: 12)),
+                  Checkbox(
+                    value: item.escBold,
+                    onChanged: (value) {
+                      if (value != null) ctrl.updateEscBold(item, value);
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const Divider(),
+        ],
       ),
     );
   }

@@ -46,6 +46,7 @@ dependencies:
   pdf: ^3.11.3
   printing: ^5.14.2
   qr_flutter: ^4.1.0
+  qr: ^3.0.2
 
   # ── Unique job IDs ───────────────────────────
   uuid: ^3.0.7

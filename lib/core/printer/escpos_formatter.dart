@@ -178,17 +178,21 @@
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
+import 'package:qr/qr.dart';
 import 'package:printer_agent/core/profile/restaurant_profile_model.dart';
 import 'package:printer_agent/core/profile/restaurant_profile_service.dart';
 import 'package:printer_agent/core/services/print_style_service.dart';
 import '../models/print_job.dart';
 import '../models/order_item.dart';
+import '../models/print_style_config.dart';
 import '../models/restaurant_order.dart';
 import '../config/print_config.dart';
 
 class EscPosFormatter {
+  static late PrintStyleConfig _style;
+
   static Future<List<int>> format(PrintJob job) async {
-    final style = await PrintStyleService.getConfig();
+    _style = await PrintStyleService.getConfig();
     final profile = await CapabilityProfile.load();
     final currentPaperSize =
         PrintConfig.is80mm ? PaperSize.mm80 : PaperSize.mm58;
@@ -197,13 +201,13 @@ class EscPosFormatter {
     List<int> bytes = [];
 
     // Left margin via GS L command (203 DPI → 8 dots/mm)
-    final leftDots = (style.marginLeftMm * 8).round();
+    final leftDots = (_style.marginLeftMm * 8).round();
     if (leftDots > 0) {
       bytes += [0x1D, 0x4C, leftDots & 0xFF, (leftDots >> 8) & 0xFF];
     }
 
     // Top margin: empty feed lines (standard thermal line ≈ 3.5 mm)
-    final topLines = (style.marginTopMm / 3.5).round();
+    final topLines = (_style.marginTopMm / 3.5).round();
     if (topLines > 0) bytes += generator.emptyLines(topLines);
 
     if (job.type == PrintType.kot) {
@@ -215,14 +219,29 @@ class EscPosFormatter {
       img.Image? logoImage = await _fetchEscLogo(restaurantProfile);
       // Resize to configured width (203 DPI: 1mm ≈ 8 dots); height auto-scales.
       if (logoImage != null) {
-        final targetWidthDots = (style.logoWidthMm * 8).round().clamp(50, 400);
+        final targetWidthDots =
+            (_style.escLogoSizeMm * 8).round().clamp(50, 400);
         logoImage = img.copyResize(logoImage, width: targetWidthDots);
       }
-      bytes += _buildBill(generator, job.order, restaurantProfile, logoImage);
+
+      final isAggregator = job.order.billData['is_aggregator'] == true;
+      final upiQrImage = (!isAggregator &&
+              PrintConfig.upiQrEnabled &&
+              PrintConfig.upiId.trim().isNotEmpty)
+          ? _buildQrBitmap(PrintConfig.upiQrDataForBill(job.order.billData),
+              _style.escUpiQrSizeMm)
+          : null;
+      final feedbackQrImage = (!isAggregator && PrintConfig.feedbackQrEnabled)
+          ? _buildQrBitmap(PrintConfig.feedbackQrData(job.order.orderId),
+              _style.escFeedbackQrSizeMm)
+          : null;
+
+      bytes += _buildBill(generator, job.order, restaurantProfile, logoImage,
+          upiQrImage, feedbackQrImage);
     }
 
     // Bottom margin
-    final bottomLines = (style.marginBottomMm / 3.5).round();
+    final bottomLines = (_style.marginBottomMm / 3.5).round();
     if (bottomLines > 0) bytes += generator.emptyLines(bottomLines);
 
     bytes += generator.cut();
@@ -242,6 +261,99 @@ class EscPosFormatter {
   static int get _waiterNameWidth => _width == 42 ? 24 : 16;
   static int get _padding => _width == 42 ? 2 : 1;
   static int get _innerWidth => _width - _padding; // right side stays open
+
+  static PosTextSize _posTextSize(int size) {
+    switch (size.clamp(1, 8)) {
+      case 2:
+        return PosTextSize.size2;
+      case 3:
+        return PosTextSize.size3;
+      case 4:
+        return PosTextSize.size4;
+      case 5:
+        return PosTextSize.size5;
+      case 6:
+        return PosTextSize.size6;
+      case 7:
+        return PosTextSize.size7;
+      case 8:
+        return PosTextSize.size8;
+      default:
+        return PosTextSize.size1;
+    }
+  }
+
+  /// Renders [data] as a black-on-white QR bitmap sized to [sizeMm].
+  ///
+  /// The native `GS ( k` QR command is unsupported by many thermal printers —
+  /// they echo the command parameters as text instead — so the symbol is drawn
+  /// as pixels and sent through the same `ESC *` path used for the logo.
+  /// Modules are painted at an integer scale so they stay pure black/white:
+  /// resampling would blur the edges past the printer's luminance threshold.
+  static img.Image? _buildQrBitmap(String data, double sizeMm) {
+    if (data.trim().isEmpty) return null;
+    try {
+      final code = QrCode.fromData(
+        data: data,
+        errorCorrectLevel: QrErrorCorrectLevel.M,
+      );
+      final matrix = QrImage(code);
+
+      const quietModules = 4; // mandatory white border, else scanners fail
+      final totalModules = matrix.moduleCount + quietModules * 2;
+      final maxDots = PrintConfig.is80mm ? 576 : 384;
+      final targetDots = (sizeMm * 8).round().clamp(80, maxDots);
+      final scale = (targetDots ~/ totalModules).clamp(1, 12);
+      final sideDots = totalModules * scale;
+
+      final bitmap = img.Image(width: sideDots, height: sideDots);
+      img.fill(bitmap, color: img.ColorRgb8(255, 255, 255));
+      final black = img.ColorRgb8(0, 0, 0);
+
+      for (var row = 0; row < matrix.moduleCount; row++) {
+        for (var col = 0; col < matrix.moduleCount; col++) {
+          if (!matrix.isDark(row, col)) continue;
+          final x = (col + quietModules) * scale;
+          final y = (row + quietModules) * scale;
+          img.fillRect(
+            bitmap,
+            x1: x,
+            y1: y,
+            x2: x + scale - 1,
+            y2: y + scale - 1,
+            color: black,
+          );
+        }
+      }
+      return bitmap;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static PosStyles _escStyle(
+    PrintStyleItem item, {
+    PosAlign align = PosAlign.left,
+    bool underline = false,
+    bool? boldOverride,
+  }) {
+    final size = PrintConfig.is80mm ? item.escSize80 : item.escSize58;
+    final posSize = _posTextSize(size);
+    return PosStyles(
+      align: align,
+      bold: boldOverride ?? item.escBold,
+      underline: underline,
+      height: posSize,
+      width: posSize,
+    );
+  }
+
+  static bool _sameEscStyle(PrintStyleItem first, PrintStyleItem second) {
+    final firstSize = PrintConfig.is80mm ? first.escSize80 : first.escSize58;
+    final secondSize = PrintConfig.is80mm ? second.escSize80 : second.escSize58;
+    return firstSize == secondSize && first.escBold == second.escBold;
+  }
+
   // ─────────────────────────────────────────────────────
   // ALIGNMENT HELPER
   // Pads left + right to fill full _width
@@ -296,6 +408,8 @@ class EscPosFormatter {
     RestaurantOrder o,
     RestaurantProfileModel profile,
     img.Image? logoImage,
+    img.Image? upiQrImage,
+    img.Image? feedbackQrImage,
   ) {
     List<int> b = [];
 
@@ -349,18 +463,13 @@ class EscPosFormatter {
 
     b += g.text(
       restaurantName.toUpperCase(),
-      styles: const PosStyles(
-        bold: true,
-        height: PosTextSize.size2,
-        width: PosTextSize.size2,
-        align: PosAlign.center,
-      ),
+      styles: _escStyle(_style.restaurantName, align: PosAlign.center),
     );
 
     if (restaurantAddress.isNotEmpty) {
       b += g.text(
         restaurantAddress,
-        styles: const PosStyles(align: PosAlign.center),
+        styles: _escStyle(_style.restaurantAddress, align: PosAlign.center),
       );
     }
 
@@ -374,21 +483,21 @@ class EscPosFormatter {
     if (restaurantPhone.isNotEmpty) {
       b += g.text(
         'Ph: $restaurantPhone',
-        styles: const PosStyles(align: PosAlign.center),
+        styles: _escStyle(_style.restaurantPhone, align: PosAlign.center),
       );
     }
 
     if (restaurantGstNo.isNotEmpty) {
       b += g.text(
         'GST No: $restaurantGstNo',
-        styles: const PosStyles(align: PosAlign.center),
+        styles: _escStyle(_style.restaurantGst, align: PosAlign.center),
       );
     }
 
     if (restaurantFssai.isNotEmpty) {
       b += g.text(
         'Fssai No: $restaurantFssai',
-        styles: const PosStyles(align: PosAlign.center),
+        styles: _escStyle(_style.restaurantFssai, align: PosAlign.center),
       );
     }
 
@@ -406,10 +515,7 @@ class EscPosFormatter {
     )) {
       b += g.text(
         row,
-        styles: const PosStyles(
-          bold: true,
-          align: PosAlign.center,
-        ),
+        styles: _escStyle(_style.billInfoRow1, align: PosAlign.center),
       );
     }
 
@@ -424,10 +530,7 @@ class EscPosFormatter {
       )) {
         b += g.text(
           row,
-          styles: const PosStyles(
-            bold: true,
-            align: PosAlign.center,
-          ),
+          styles: _escStyle(_style.billInfoRow2, align: PosAlign.center),
         );
       }
     }
@@ -440,10 +543,7 @@ class EscPosFormatter {
       )) {
         b += g.text(
           row,
-          styles: const PosStyles(
-            bold: true,
-            align: PosAlign.center,
-          ),
+          styles: _escStyle(_style.billInfoRow3, align: PosAlign.center),
         );
       }
     }
@@ -451,15 +551,12 @@ class EscPosFormatter {
     if (o.dailyToken.isNotEmpty) {
       for (final row in _buildWrapped3ColRow(
         '',
-        'Token No: ${o.dailyToken}',
+        'T-${o.dailyToken}',
         '',
       )) {
         b += g.text(
           row,
-          styles: const PosStyles(
-            bold: true,
-            align: PosAlign.center,
-          ),
+          styles: _escStyle(_style.billInfoRow4, align: PosAlign.center),
         );
       }
     }
@@ -467,7 +564,8 @@ class EscPosFormatter {
     b += g.text(lineDashes,
         styles: const PosStyles(align: PosAlign.center, bold: true));
     // ── Table Header ──  full width columns
-    final bool show80mmDate = PrintConfig.is80mm && PrintConfig.showItemDateOn80mm;
+    final bool show80mmDate =
+        PrintConfig.is80mm && PrintConfig.showItemDateOn80mm;
     final int amtWidth = _width == 42 ? 10 : 8;
     final int qtyWidth = _width == 42 ? 7 : 6;
     final int dateWidth = show80mmDate ? 6 : 0; // "9-Jul" = 5 chars + 1 pad
@@ -478,7 +576,7 @@ class EscPosFormatter {
           _padC('QTY', qtyWidth) +
           _padL('AMT', amtWidth) +
           (show80mmDate ? _padL('DATE', dateWidth) : ''),
-      styles: const PosStyles(bold: true, align: PosAlign.center),
+      styles: _escStyle(_style.billTableHeader, align: PosAlign.center),
     );
     b += g.text(lineDashes,
         styles: const PosStyles(align: PosAlign.center, bold: true));
@@ -508,18 +606,44 @@ class EscPosFormatter {
 
       final dateStr = show80mmDate ? _escItemDate(item.createdAt) : '';
 
-      b += g.text(
-        _padR(itemNameLines.first, itemWidth) +
-            _padC(qtyDisplay, qtyWidth) +
-            _padL(_formatMoney(amt), amtWidth) +
-            (show80mmDate ? _padL(dateStr, dateWidth) : ''),
-        styles: const PosStyles(bold: false, align: PosAlign.left),
-      );
+      if (_sameEscStyle(_style.billTableContent, _style.billTableQty)) {
+        b += g.text(
+          _padR(itemNameLines.first, itemWidth) +
+              _padC(qtyDisplay, qtyWidth) +
+              _padL(_formatMoney(amt), amtWidth) +
+              (show80mmDate ? _padL(dateStr, dateWidth) : ''),
+          styles: _escStyle(_style.billTableContent),
+        );
+      } else {
+        b += g.row([
+          PosColumn(
+            text: itemNameLines.first,
+            width: show80mmDate ? 7 : 8,
+            styles: _escStyle(_style.billTableContent),
+          ),
+          PosColumn(
+            text: qtyDisplay,
+            width: show80mmDate ? 1 : 2,
+            styles: _escStyle(_style.billTableQty, align: PosAlign.center),
+          ),
+          PosColumn(
+            text: _formatMoney(amt),
+            width: 2,
+            styles: _escStyle(_style.billTableContent, align: PosAlign.right),
+          ),
+          if (show80mmDate)
+            PosColumn(
+              text: dateStr,
+              width: 2,
+              styles: _escStyle(_style.billTableContent, align: PosAlign.right),
+            ),
+        ]);
+      }
 
       for (int i = 1; i < itemNameLines.length; i++) {
         b += g.text(
           _padR(itemNameLines[i], itemWidth),
-          styles: const PosStyles(align: PosAlign.left),
+          styles: _escStyle(_style.billTableContent),
         );
       }
 
@@ -534,7 +658,7 @@ class EscPosFormatter {
           for (int i = 0; i < wrapped.length; i++) {
             b += g.text(
               i == 0 ? ' ${wrapped[i]}' : '   ${wrapped[i]}',
-              styles: const PosStyles(align: PosAlign.left),
+              styles: _escStyle(_style.billTableMeta),
             );
           }
         }
@@ -551,7 +675,7 @@ class EscPosFormatter {
           for (int i = 0; i < wrapped.length; i++) {
             b += g.text(
               i == 0 ? ' ${wrapped[i]}' : '   ${wrapped[i]}',
-              styles: const PosStyles(align: PosAlign.left),
+              styles: _escStyle(_style.billTableMeta),
             );
           }
         }
@@ -565,7 +689,7 @@ class EscPosFormatter {
       b += g.text(lineDashes,
           styles: const PosStyles(align: PosAlign.center, bold: true));
       b += g.text('Notes : $orderNote',
-          styles: const PosStyles(align: PosAlign.center, bold: true));
+          styles: _escStyle(_style.orderNote, align: PosAlign.center));
     }
 
     // ════════════════════════════════════════════════════
@@ -651,60 +775,100 @@ class EscPosFormatter {
     //   b += g.text(_alignLR('VAT', vatTax.toStringAsFixed(2)));
     // }
     b += g.text(
-        _alignRightLabelValue('Item Total', itemTotal.toStringAsFixed(2)));
+      _alignRightLabelValue('Item Total', itemTotal.toStringAsFixed(2)),
+      styles: _escStyle(_style.billAmountLine),
+    );
 
     if (serviceCharge > 0) {
-      b += g.text(_alignRightLabelValue(
-          'Service Charge', serviceCharge.toStringAsFixed(2)));
+      b += g.text(
+        _alignRightLabelValue(
+            'Service Charge', serviceCharge.toStringAsFixed(2)),
+        styles: _escStyle(_style.billAmountLine),
+      );
     }
 
     if (deliveryCharge > 0) {
-      b += g.text(_alignRightLabelValue(
-          'Delivery Charge', deliveryCharge.toStringAsFixed(2)));
+      b += g.text(
+        _alignRightLabelValue(
+            'Delivery Charge', deliveryCharge.toStringAsFixed(2)),
+        styles: _escStyle(_style.billAmountLine),
+      );
     }
 
     if (discountAmount > 0) {
-      b += g.text(_alignRightLabelValue('Discount', discountAmount.toString()));
+      b += g.text(
+        _alignRightLabelValue('Discount', discountAmount.toString()),
+        styles: _escStyle(_style.billAmountLine),
+      );
     }
 
     if (packingCharge > 0) {
-      b += g.text(_alignRightLabelValue(
-          'Packing Charge', packingCharge.toStringAsFixed(2)));
+      b += g.text(
+        _alignRightLabelValue(
+            'Packing Charge', packingCharge.toStringAsFixed(2)),
+        styles: _escStyle(_style.billAmountLine),
+      );
     }
 
     if (couponCode != '') {
-      b += g.text(_alignRightLabelValue('Coupon Code', couponCode.toString()));
+      b += g.text(
+        _alignRightLabelValue('Coupon Code', couponCode.toString()),
+        styles: _escStyle(_style.billAmountLine),
+      );
     }
 
     if (loyaltyAmount > 0) {
-      b += g.text(_alignRightLabelValue('Loyalty', loyaltyAmount.toString()));
+      b += g.text(
+        _alignRightLabelValue('Loyalty', loyaltyAmount.toString()),
+        styles: _escStyle(_style.billAmountLine),
+      );
     }
 
     if (walletAmount > 0) {
-      b += g.text(_alignRightLabelValue('Wallet', walletAmount.toString()));
+      b += g.text(
+        _alignRightLabelValue('Wallet', walletAmount.toString()),
+        styles: _escStyle(_style.billAmountLine),
+      );
     }
 
     if (tip > 0) {
-      b += g.text(_alignRightLabelValue('Tip', tip.toStringAsFixed(2)));
+      b += g.text(
+        _alignRightLabelValue('Tip', tip.toStringAsFixed(2)),
+        styles: _escStyle(_style.billAmountLine),
+      );
     }
 
     if (!isAggregator) {
-      b += g
-          .text(_alignRightLabelValue('Sub Total', subTotal.toStringAsFixed(2)));
+      b += g.text(
+        _alignRightLabelValue('Sub Total', subTotal.toStringAsFixed(2)),
+        styles: _escStyle(_style.billAmountLine),
+      );
     }
 
     if (gstTax > 0) {
       if (isAggregator) {
-        b += g.text(_alignRightLabelValue('GST', gstTax.toStringAsFixed(2)));
+        b += g.text(
+          _alignRightLabelValue('GST', gstTax.toStringAsFixed(2)),
+          styles: _escStyle(_style.billAmountLine),
+        );
       } else {
         final half = gstTax / 2;
-        b += g.text(_alignRightLabelValue('CGST', half.toStringAsFixed(2)));
-        b += g.text(_alignRightLabelValue('SGST', half.toStringAsFixed(2)));
+        b += g.text(
+          _alignRightLabelValue('CGST', half.toStringAsFixed(2)),
+          styles: _escStyle(_style.billAmountLine),
+        );
+        b += g.text(
+          _alignRightLabelValue('SGST', half.toStringAsFixed(2)),
+          styles: _escStyle(_style.billAmountLine),
+        );
       }
     }
 
     if (vatTax > 0) {
-      b += g.text(_alignRightLabelValue('VAT', vatTax.toStringAsFixed(2)));
+      b += g.text(
+        _alignRightLabelValue('VAT', vatTax.toStringAsFixed(2)),
+        styles: _escStyle(_style.billAmountLine),
+      );
     }
 
     b += g.text(lineDashes,
@@ -712,21 +876,31 @@ class EscPosFormatter {
 
     // Total — room = payment_amount, normal = grant_amount
     final totalAmount = isRoomOrder ? paymentAmount : grantAmount;
-    final totalLabel = isRoomOrder || isAggregator
-        ? 'TOTAL'
-        : 'TOTAL ${payLabel()}';
-    b += g.text(
-      _alignLR(totalLabel, _formatMoney(totalAmount ?? 0)),
-      styles: const PosStyles(bold: true, align: PosAlign.center),
-    );
+    final paymentLabel = isRoomOrder || isAggregator ? '' : payLabel();
+    if (paymentLabel.isEmpty ||
+        _sameEscStyle(_style.billTotal, _style.billPaidBy)) {
+      final totalLabel = paymentLabel.isEmpty ? 'TOTAL' : 'TOTAL $paymentLabel';
+      b += g.text(
+        _alignLR(totalLabel, _formatMoney(totalAmount ?? 0)),
+        styles: _escStyle(_style.billTotal, align: PosAlign.center),
+      );
+    } else {
+      b += g.text(
+        _alignLR('TOTAL', _formatMoney(totalAmount ?? 0)),
+        styles: _escStyle(_style.billTotal, align: PosAlign.center),
+      );
+      b += g.text(
+        paymentLabel,
+        styles: _escStyle(_style.billPaidBy, align: PosAlign.left),
+      );
+    }
 
     // ── Delivery Details — only for delivery orders ───────
     if (bill['order_type']?.toString() == 'delivery') {
       b += g.text(lineDashes,
           styles: const PosStyles(align: PosAlign.center, bold: true));
       b += g.text('-- Delivery Details --',
-          styles: const PosStyles(
-              bold: true, align: PosAlign.center, height: PosTextSize.size1));
+          styles: _escStyle(_style.deliveryHeader, align: PosAlign.center));
       b += g.text(lineDashes,
           styles: const PosStyles(align: PosAlign.center, bold: true));
 
@@ -761,11 +935,26 @@ class EscPosFormatter {
         return buffer.toString();
       }
 
-      if (custName.isNotEmpty) b += g.text(row('Name', custName));
-      if (phone.isNotEmpty) b += g.text(row('Phone', phone));
-      if (addrType.isNotEmpty) b += g.text(row('Add. Type', addrType));
-      if (addr.isNotEmpty) b += g.text(row('Address', addr));
-      if (pincode.isNotEmpty) b += g.text(row('Pincode', pincode));
+      if (custName.isNotEmpty) {
+        b += g.text(row('Name', custName),
+            styles: _escStyle(_style.deliveryContent));
+      }
+      if (phone.isNotEmpty) {
+        b += g.text(row('Phone', phone),
+            styles: _escStyle(_style.deliveryContent));
+      }
+      if (addrType.isNotEmpty) {
+        b += g.text(row('Add. Type', addrType),
+            styles: _escStyle(_style.deliveryContent));
+      }
+      if (addr.isNotEmpty) {
+        b += g.text(row('Address', addr),
+            styles: _escStyle(_style.deliveryContent));
+      }
+      if (pincode.isNotEmpty) {
+        b += g.text(row('Pincode', pincode),
+            styles: _escStyle(_style.deliveryContent));
+      }
     }
 
     // ── Previous Room Bill — only for room orders ─────────
@@ -774,7 +963,7 @@ class EscPosFormatter {
           styles: const PosStyles(align: PosAlign.center, bold: true));
       b += g.text(
         '-- Previous Room Bill --',
-        styles: const PosStyles(bold: true, align: PosAlign.center),
+        styles: _escStyle(_style.roomHeader, align: PosAlign.center),
       );
       b += g.text(lineDashes,
           styles: const PosStyles(align: PosAlign.center, bold: true));
@@ -784,16 +973,23 @@ class EscPosFormatter {
         final aId = aMap['restaurant_order_id']?.toString() ?? '';
         final aAmt =
             double.tryParse(aMap['order_amount']?.toString() ?? '0') ?? 0.0;
-        b += g.text(_alignLR('Order ID #$aId', aAmt.toStringAsFixed(2)));
+        b += g.text(
+          _alignLR('Order ID #$aId', aAmt.toStringAsFixed(2)),
+          styles: _escStyle(_style.roomContent),
+        );
       }
 
       b += g.text(lineDashes,
           styles: const PosStyles(align: PosAlign.center, bold: true));
 
-      b += g.text(_alignRightLabelValue(
-          'Room Advance', roomAdvance.toStringAsFixed(2)));
-      b += g.text(_alignRightLabelValue(
-          'Room Pending', roomPending.toStringAsFixed(2)));
+      b += g.text(
+        _alignRightLabelValue('Room Advance', roomAdvance.toStringAsFixed(2)),
+        styles: _escStyle(_style.billAmountLine),
+      );
+      b += g.text(
+        _alignRightLabelValue('Room Pending', roomPending.toStringAsFixed(2)),
+        styles: _escStyle(_style.billAmountLine),
+      );
 
       b += g.text(lineDashes,
           styles: const PosStyles(align: PosAlign.center, bold: true));
@@ -801,31 +997,25 @@ class EscPosFormatter {
       b += g.text(
         _alignLR('GRAND TOTAL ${payLabel()}',
             'Rs.${grantAmount.toStringAsFixed(0)}'),
-        styles: const PosStyles(bold: true, align: PosAlign.center),
+        styles: _escStyle(_style.billGrandTotal, align: PosAlign.center),
       );
     }
 
     // ── QR Codes — bill only, never on aggregator orders ──
-    if (!isAggregator) {
-      final qrSize = PrintConfig.is80mm ? QRSize.size6 : QRSize.size5;
+    if (upiQrImage != null) {
+      b += g.text(lineDashes,
+          styles: const PosStyles(align: PosAlign.center, bold: true));
+      b += g.image(upiQrImage, align: PosAlign.center);
+      b += g.text('Scan to Pay',
+          styles: _escStyle(_style.footer, align: PosAlign.center));
+    }
 
-      if (PrintConfig.upiQrEnabled && PrintConfig.upiId.trim().isNotEmpty) {
-        b += g.text(lineDashes,
-            styles: const PosStyles(align: PosAlign.center, bold: true));
-        b += g.qrcode(PrintConfig.upiQrDataForBill(bill), size: qrSize,
-            cor: QRCorrection.M);
-        b += g.text('Scan to Pay',
-            styles: const PosStyles(align: PosAlign.center));
-      }
-
-      if (PrintConfig.feedbackQrEnabled) {
-        b += g.text(lineDashes,
-            styles: const PosStyles(align: PosAlign.center, bold: true));
-        b += g.qrcode(PrintConfig.feedbackQrData(o.orderId), size: qrSize,
-            cor: QRCorrection.M);
-        b += g.text('Scan for Feedback',
-            styles: const PosStyles(align: PosAlign.center));
-      }
+    if (feedbackQrImage != null) {
+      b += g.text(lineDashes,
+          styles: const PosStyles(align: PosAlign.center, bold: true));
+      b += g.image(feedbackQrImage, align: PosAlign.center);
+      b += g.text('Scan for Feedback',
+          styles: _escStyle(_style.footer, align: PosAlign.center));
     }
 
     // ── Footer ───────────────────────────────────────────
@@ -834,11 +1024,15 @@ class EscPosFormatter {
     if (profile.footerText.isNotEmpty)
       b += g.text(
         profile.footerText,
-        styles: const PosStyles(align: PosAlign.center),
+        styles: _escStyle(_style.footer, align: PosAlign.center),
       );
     b += g.text(
       'Powered by MyGenie',
-      styles: const PosStyles(align: PosAlign.center, bold: true),
+      styles: _escStyle(
+        _style.footer,
+        align: PosAlign.center,
+        boldOverride: true,
+      ),
     );
 
     return b;
@@ -873,12 +1067,7 @@ class EscPosFormatter {
     for (final line in _wrapTitle(title)) {
       b += g.text(
         line,
-        styles: const PosStyles(
-          bold: true,
-          align: PosAlign.center,
-          height: PosTextSize.size2,
-          width: PosTextSize.size2,
-        ),
+        styles: _escStyle(_style.kotTitle, align: PosAlign.center),
       );
     }
 
@@ -894,10 +1083,7 @@ class EscPosFormatter {
     )) {
       b += g.text(
         row,
-        styles: const PosStyles(
-          bold: true,
-          align: PosAlign.center,
-        ),
+        styles: _escStyle(_style.kotOrderInfo1, align: PosAlign.center),
       );
     }
 
@@ -920,10 +1106,7 @@ class EscPosFormatter {
       )) {
         b += g.text(
           row,
-          styles: const PosStyles(
-            bold: true,
-            align: PosAlign.center,
-          ),
+          styles: _escStyle(_style.kotOrderInfo2, align: PosAlign.center),
         );
       }
     }
@@ -936,10 +1119,7 @@ class EscPosFormatter {
       )) {
         b += g.text(
           row,
-          styles: const PosStyles(
-            bold: true,
-            align: PosAlign.center,
-          ),
+          styles: _escStyle(_style.kotOrderInfo3, align: PosAlign.center),
         );
       }
     }
@@ -947,10 +1127,13 @@ class EscPosFormatter {
     if (o.dailyToken.isNotEmpty) {
       for (final row in _buildWrapped3ColRow(
         '',
-        'Token No: ${o.dailyToken}',
+        'T-${o.dailyToken}',
         '',
       )) {
-        b += g.text(row, styles: const PosStyles(bold: true, align: PosAlign.center));
+        b += g.text(
+          row,
+          styles: _escStyle(_style.kotOrderInfo4, align: PosAlign.center),
+        );
       }
     }
 
@@ -963,7 +1146,7 @@ class EscPosFormatter {
       _padR('SR', srWidth) +
           _padR(' ITEM', itemWidth) +
           _padL('QTY  ', qtyWidth),
-      styles: const PosStyles(bold: true, align: PosAlign.left),
+      styles: _escStyle(_style.kotTableHeader),
     );
 
     b += g.text(
@@ -988,13 +1171,13 @@ class EscPosFormatter {
         _padR(sr, srWidth) +
             _padR(itemNameLines.first, itemWidth) +
             _padL(qty, qtyWidth),
-        styles: const PosStyles(bold: true, align: PosAlign.left),
+        styles: _escStyle(_style.kotTableContent),
       );
 
       for (int i = 1; i < itemNameLines.length; i++) {
         b += g.text(
           _padR('', srWidth) + _padR(itemNameLines[i], itemWidth),
-          styles: const PosStyles(bold: true, align: PosAlign.left),
+          styles: _escStyle(_style.kotTableContent),
         );
       }
 
@@ -1010,7 +1193,7 @@ class EscPosFormatter {
           for (int i = 0; i < wrapped.length; i++) {
             b += g.text(
               i == 0 ? '   ${wrapped[i]}' : wrapped[i],
-              styles: const PosStyles(align: PosAlign.left),
+              styles: _escStyle(_style.kotTableContent, boldOverride: false),
             );
           }
         }
@@ -1028,7 +1211,7 @@ class EscPosFormatter {
           for (int i = 0; i < wrapped.length; i++) {
             b += g.text(
               i == 0 ? '   ${wrapped[i]}' : wrapped[i],
-              styles: const PosStyles(align: PosAlign.left),
+              styles: _escStyle(_style.kotTableContent, boldOverride: false),
             );
           }
         }
@@ -1045,7 +1228,7 @@ class EscPosFormatter {
         for (int i = 0; i < wrapped.length; i++) {
           b += g.text(
             i == 0 ? '   ${wrapped[i]}' : wrapped[i],
-            styles: const PosStyles(underline: false, align: PosAlign.left),
+            styles: _escStyle(_style.kotTableContent, boldOverride: false),
           );
         }
       }
@@ -1057,7 +1240,7 @@ class EscPosFormatter {
       );
       b += g.text(
         _padC('Notes: ${_truncate(o.orderNote.trim(), _width - 8)}', _width),
-        styles: const PosStyles(bold: true, align: PosAlign.left),
+        styles: _escStyle(_style.kotNote),
       );
     }
 
@@ -1068,7 +1251,11 @@ class EscPosFormatter {
 
     b += g.text(
       _padC('Powered by MyGenie', _width),
-      styles: const PosStyles(bold: true, align: PosAlign.left),
+      styles: _escStyle(
+        _style.footer,
+        align: PosAlign.left,
+        boldOverride: true,
+      ),
     );
 
     return b;
@@ -1104,12 +1291,7 @@ class EscPosFormatter {
     for (final line in _wrapTitle(title)) {
       b += g.text(
         line,
-        styles: const PosStyles(
-          bold: true,
-          align: PosAlign.center,
-          height: PosTextSize.size2,
-          width: PosTextSize.size2,
-        ),
+        styles: _escStyle(_style.cancelKotTitle, align: PosAlign.center),
       );
     }
 
@@ -1125,10 +1307,7 @@ class EscPosFormatter {
     )) {
       b += g.text(
         row,
-        styles: const PosStyles(
-          bold: true,
-          align: PosAlign.center,
-        ),
+        styles: _escStyle(_style.kotOrderInfo1, align: PosAlign.center),
       );
     }
 
@@ -1151,10 +1330,7 @@ class EscPosFormatter {
       )) {
         b += g.text(
           row,
-          styles: const PosStyles(
-            bold: true,
-            align: PosAlign.center,
-          ),
+          styles: _escStyle(_style.kotOrderInfo2, align: PosAlign.center),
         );
       }
     }
@@ -1167,10 +1343,7 @@ class EscPosFormatter {
       )) {
         b += g.text(
           row,
-          styles: const PosStyles(
-            bold: true,
-            align: PosAlign.center,
-          ),
+          styles: _escStyle(_style.kotOrderInfo3, align: PosAlign.center),
         );
       }
     }
@@ -1178,10 +1351,13 @@ class EscPosFormatter {
     if (o.dailyToken.isNotEmpty) {
       for (final row in _buildWrapped3ColRow(
         '',
-        'Token No: ${o.dailyToken}',
+        'T-${o.dailyToken}',
         '',
       )) {
-        b += g.text(row, styles: const PosStyles(bold: true, align: PosAlign.center));
+        b += g.text(
+          row,
+          styles: _escStyle(_style.kotOrderInfo4, align: PosAlign.center),
+        );
       }
     }
 
@@ -1194,7 +1370,7 @@ class EscPosFormatter {
       _padR('SR', srWidth) +
           _padR(' ITEM', itemWidth) +
           _padL('QTY  ', qtyWidth),
-      styles: const PosStyles(bold: true, align: PosAlign.left),
+      styles: _escStyle(_style.kotTableHeader),
     );
 
     b += g.text(
@@ -1216,13 +1392,13 @@ class EscPosFormatter {
         _padR(sr, srWidth) +
             _padR(itemNameLines.first, itemWidth) +
             _padL(qty, qtyWidth),
-        styles: const PosStyles(bold: true, align: PosAlign.left),
+        styles: _escStyle(_style.kotTableContent),
       );
 
       for (int i = 1; i < itemNameLines.length; i++) {
         b += g.text(
           _padR('', srWidth) + _padR(itemNameLines[i], itemWidth),
-          styles: const PosStyles(bold: true, align: PosAlign.left),
+          styles: _escStyle(_style.kotTableContent),
         );
       }
 
@@ -1238,7 +1414,7 @@ class EscPosFormatter {
           for (int i = 0; i < wrapped.length; i++) {
             b += g.text(
               i == 0 ? '   ${wrapped[i]}' : wrapped[i],
-              styles: const PosStyles(align: PosAlign.left),
+              styles: _escStyle(_style.kotTableContent, boldOverride: false),
             );
           }
         }
@@ -1256,7 +1432,7 @@ class EscPosFormatter {
           for (int i = 0; i < wrapped.length; i++) {
             b += g.text(
               i == 0 ? '   ${wrapped[i]}' : wrapped[i],
-              styles: const PosStyles(align: PosAlign.left),
+              styles: _escStyle(_style.kotTableContent, boldOverride: false),
             );
           }
         }
@@ -1273,7 +1449,7 @@ class EscPosFormatter {
         for (int i = 0; i < wrapped.length; i++) {
           b += g.text(
             i == 0 ? '   ${wrapped[i]}' : wrapped[i],
-            styles: const PosStyles(underline: false, align: PosAlign.left),
+            styles: _escStyle(_style.kotTableContent, boldOverride: false),
           );
         }
       }
@@ -1286,7 +1462,11 @@ class EscPosFormatter {
 
     b += g.text(
       _padC('Powered by MyGenie', _width),
-      styles: const PosStyles(bold: true, align: PosAlign.left),
+      styles: _escStyle(
+        _style.footer,
+        align: PosAlign.left,
+        boldOverride: true,
+      ),
     );
 
     return b;
@@ -1328,8 +1508,18 @@ class EscPosFormatter {
 
 // Date formatter for 80mm bill DATE column — returns "9-Jul" style
   static const _escMonths = [
-    'Jan','Feb','Mar','Apr','May','Jun',
-    'Jul','Aug','Sep','Oct','Nov','Dec',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
   static String _escItemDate(DateTime? dt) {
     if (dt == null) return '-';
