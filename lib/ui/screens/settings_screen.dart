@@ -6,7 +6,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_thermal_printer/flutter_thermal_printer.dart';
 import 'package:flutter_thermal_printer/utils/printer.dart';
 import 'package:printer_agent/core/models/printer_config.dart';
+import 'package:printer_agent/core/printer/bluetooth_address.dart';
 import 'package:printer_agent/core/queue/print_queue_manager.dart';
+import 'package:printer_agent/ui/screens/diagnostics_screen.dart';
 import '../../core/config/print_config.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -659,7 +661,7 @@ class _PrinterCard extends StatelessWidget {
       case PrinterType.wifi:
         return '${config.ipAddress ?? '—'}:${config.port}';
       case PrinterType.bluetooth:
-        return config.macAddress ?? '—';
+        return BluetoothAddress.displayMac(config.macAddress ?? '—');
       case PrinterType.usb:
         if (Platform.isWindows) return config.windowsPrinterName ?? '—';
         return 'vendor=${config.vendorId} product=${config.productId}';
@@ -705,6 +707,7 @@ class _PrinterFormSheetState extends State<_PrinterFormSheet> {
   PrinterConnectionType _connType    = PrinterConnectionType.usb;
   bool                  _handlesBill = false;
   Set<String>           _stations    = {};
+  BluetoothMode?        _bluetoothMode;
 
   List<Printer> _foundPrinters = [];
   Printer?      _selectedPrinter;
@@ -727,8 +730,9 @@ class _PrinterFormSheetState extends State<_PrinterFormSheet> {
         _ipCtrl.text      = init.ipAddress ?? '';
         _portCtrl.text    = init.port.toString();
       } else if (init.type == PrinterType.bluetooth) {
-        _connType      = PrinterConnectionType.bluetooth;
-        _macCtrl.text  = init.macAddress ?? '';
+        _connType         = PrinterConnectionType.bluetooth;
+        _macCtrl.text     = BluetoothAddress.displayMac(init.macAddress ?? '');
+        _bluetoothMode    = init.bluetoothMode;
       } else {
         _connType = PrinterConnectionType.usb;
         _printerNameCtrl.text = init.windowsPrinterName ?? '';
@@ -759,15 +763,19 @@ class _PrinterFormSheetState extends State<_PrinterFormSheet> {
   void _removeStation(String s) => setState(() => _stations.remove(s));
 
   Future<void> _scanPrinters() async {
+    // USB only — Bluetooth uses Diagnostics (see _scanBluetoothPrinters)
     setState(() { _scanning = true; _foundPrinters.clear(); });
     try {
       final plugin = FlutterThermalPrinter.instance;
-      final type   = _connType == PrinterConnectionType.bluetooth
-          ? ConnectionType.BLE
-          : ConnectionType.USB;
-      await plugin.getPrinters(connectionTypes: [type]);
+      await plugin.getPrinters(connectionTypes: [ConnectionType.USB]);
       plugin.devicesStream.listen((list) {
-        if (mounted) setState(() => _foundPrinters = list);
+        if (mounted) {
+          setState(() {
+            _foundPrinters = list
+                .where((p) => p.connectionType == ConnectionType.USB)
+                .toList();
+          });
+        }
       });
     } catch (e) {
       if (mounted) {
@@ -778,6 +786,25 @@ class _PrinterFormSheetState extends State<_PrinterFormSheet> {
     } finally {
       setState(() => _scanning = false);
     }
+  }
+
+  /// Opens Diagnostics on Bluetooth tab → discover → test → return MAC.
+  Future<void> _scanBluetoothPrinters() async {
+    final result = await Navigator.of(context, rootNavigator: true)
+        .push<BluetoothScanResult>(
+      MaterialPageRoute(
+        builder: (_) => const DiagnosticsScreen(
+          initialMode: DiagnosticConnectionType.bluetooth,
+          autoStartDiscover: true,
+          returnResult: true,
+        ),
+      ),
+    );
+    if (!mounted || result == null) return;
+    setState(() {
+      _macCtrl.text = BluetoothAddress.displayMac(result.macAddress);
+      _bluetoothMode = result.mode;
+    });
   }
 
   Future<void> _testLan() async {
@@ -833,7 +860,9 @@ class _PrinterFormSheetState extends State<_PrinterFormSheet> {
         config = PrinterConfig(
           id: id, label: _labelCtrl.text.trim(),
           type: PrinterType.bluetooth,
-          macAddress: _macCtrl.text.trim(),
+          macAddress: BluetoothAddress.extractPrinterMac(_macCtrl.text.trim()) ??
+              _macCtrl.text.trim(),
+          bluetoothMode: _bluetoothMode ?? BluetoothMode.ble,
           paperSize: paperSize,
           handledStations: _stations, handlesBill: _handlesBill,
         );
@@ -1002,34 +1031,14 @@ class _PrinterFormSheetState extends State<_PrinterFormSheet> {
             // ── Bluetooth ─────────────────────────────────────────────────
             if (_connType == PrinterConnectionType.bluetooth) ...[
               ElevatedButton.icon(
-                onPressed: _scanning ? null : _scanPrinters,
-                icon: _scanning
-                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.bluetooth_searching),
-                label: Text(_scanning ? 'Scanning...' : 'Scan Bluetooth Printers'),
+                onPressed: _scanBluetoothPrinters,
+                icon: const Icon(Icons.bluetooth_searching),
+                label: const Text('Scan Bluetooth Printers'),
                 style: ElevatedButton.styleFrom(
                   minimumSize: const Size(double.infinity, 44),
                   backgroundColor: Colors.blueAccent,
                 ),
               ),
-              if (_foundPrinters.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                DropdownButtonFormField<Printer>(
-                  decoration: const InputDecoration(labelText: 'Select Printer',
-                      border: OutlineInputBorder(), filled: true),
-                  items: _foundPrinters.map((p) => DropdownMenuItem<Printer>(
-                    value: p,
-                    child: Text('${p.name ?? 'Unknown'} — ${p.address}'),
-                  )).toList(),
-                  onChanged: (p) {
-                    if (p == null) return;
-                    setState(() {
-                      _selectedPrinter = p;
-                      _macCtrl.text    = p.address ?? '';
-                    });
-                  },
-                ),
-              ],
               if (_macCtrl.text.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Text('✅ MAC: ${_macCtrl.text}',

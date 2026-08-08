@@ -231,10 +231,12 @@ class WindowsSocketService {
         }
 
         // ── Socket auto-bill (new-order only) ─────────────────────────
-        // Independent of print_kot and printer_agent. Requires BOTH flags Yes.
-        // Does not alter KOT / update / scan / manual / aggregator paths.
+        // Requires auto-settle + bill flags Yes + BILL printer_agent match.
         if (eventType == 'new-order') {
-          _tryQueueSocketAutoBill(orderMap, order);
+          final agentList = (rawPayload is Map
+              ? rawPayload['printer_agent'] as List<dynamic>? ?? []
+              : []);
+          _tryQueueSocketAutoBill(orderMap, order, agentList);
         }
 
         // ── GATE 4: printKot check ────────────────────────────────────
@@ -924,24 +926,29 @@ class WindowsSocketService {
     _log('$logLabel queued → ${printerIds.join(', ')} #$orderId');
   }
 
-  /// Auto-bill from new-order socket when both flags are Yes.
-  /// No printer_agent / BILL-station gate — uses local bill printers only.
+  /// Auto-bill from new-order socket when auto-settle + bill flags are Yes
+  /// and this device is mapped as the BILL printer_agent.
   void _tryQueueSocketAutoBill(
     Map<String, dynamic> orderMap,
     RestaurantOrder order,
+    List<dynamic> agentList,
   ) {
     final billingAuto =
         orderMap['billing_auto_bill_print']?.toString().trim() ?? '';
     final printBillStatus =
         orderMap['print_bill_status']?.toString().trim() ?? '';
+    final paymentType =
+        orderMap['payment_type']?.toString().trim().toLowerCase() ?? '';
 
     if (!PrintConfig.autoSettle ||
         billingAuto != 'Yes' ||
-        printBillStatus != 'Yes') {
+        printBillStatus != 'Yes' ||
+        paymentType != 'prepaid') {
       _log(
         '⏩ Socket auto-bill skipped '
         '(autoSettle=${PrintConfig.autoSettle}, '
-        'billing_auto_bill_print=$billingAuto, print_bill_status=$printBillStatus) '
+        'billing_auto_bill_print=$billingAuto, print_bill_status=$printBillStatus, '
+        'payment_type=$paymentType) '
         '#${order.displayOrderId}',
       );
       return;
@@ -949,6 +956,20 @@ class WindowsSocketService {
 
     if (!PrintConfig.autoPrintBill) {
       _log('⏸️ Auto Bill print OFF — skip socket bill #${order.displayOrderId}');
+      return;
+    }
+
+    final billAgent = agentList.cast<Map<String, dynamic>>().firstWhere(
+          (a) =>
+              a['printer_agent_id']?.toString() == PrintConfig.empId &&
+              a['station']?.toString().toUpperCase() == 'BILL',
+          orElse: () => {},
+        );
+
+    if (billAgent.isEmpty) {
+      _log(
+        '⏩ No BILL agent for empId=${PrintConfig.empId} — skip socket bill #${order.displayOrderId}',
+      );
       return;
     }
 

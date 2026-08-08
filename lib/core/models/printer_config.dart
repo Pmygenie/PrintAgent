@@ -4,6 +4,22 @@ import 'dart:convert';
 
 enum PrinterType { lan, wifi, bluetooth, usb }
 
+/// Internal Bluetooth transport. Never asked of the user — set by discovery.
+enum BluetoothMode { ble, classicSpp }
+
+/// Result returned from Diagnostics when picking a Bluetooth printer.
+class BluetoothScanResult {
+  final String macAddress;
+  final String? name;
+  final BluetoothMode mode;
+
+  const BluetoothScanResult({
+    required this.macAddress,
+    required this.mode,
+    this.name,
+  });
+}
+
 class PrinterConfig {
   final String id;
   final String label;
@@ -11,6 +27,8 @@ class PrinterConfig {
   final String? ipAddress;
   final int port;
   final String? macAddress;
+  /// Set automatically by Bluetooth discovery (BLE vs classic SPP).
+  final BluetoothMode? bluetoothMode;
   final int? vendorId;
   final int? productId;
   final PaperSize paperSize;
@@ -31,6 +49,7 @@ class PrinterConfig {
     this.ipAddress,
     this.port = 9100,
     this.macAddress,
+    this.bluetoothMode,
     this.vendorId,
     this.productId,
     this.paperSize = PaperSize.mm80,
@@ -46,6 +65,7 @@ class PrinterConfig {
     'ipAddress': ipAddress,
     'port': port,
     'macAddress': macAddress,
+    'bluetoothMode': bluetoothMode?.name,
     'vendorId': vendorId,
     'productId': productId,
     'paperSize': paperSize == PaperSize.mm80 ? '80' : '58',
@@ -61,6 +81,12 @@ class PrinterConfig {
     ipAddress:          m['ipAddress'],
     port:               m['port'] ?? 9100,
     macAddress:         m['macAddress'],
+    bluetoothMode:      m['bluetoothMode'] == null
+        ? null
+        : BluetoothMode.values.firstWhere(
+            (e) => e.name == m['bluetoothMode'],
+            orElse: () => BluetoothMode.ble,
+          ),
     vendorId:           m['vendorId'],
     productId:          m['productId'],
     paperSize:          m['paperSize'] == '58' ? PaperSize.mm58 : PaperSize.mm80,
@@ -81,6 +107,7 @@ class PrinterConfig {
     String? ipAddress,
     int? port,
     String? macAddress,
+    BluetoothMode? bluetoothMode,
     int? vendorId,
     int? productId,
     PaperSize? paperSize,
@@ -94,6 +121,7 @@ class PrinterConfig {
     ipAddress:          ipAddress          ?? this.ipAddress,
     port:               port               ?? this.port,
     macAddress:         macAddress         ?? this.macAddress,
+    bluetoothMode:      bluetoothMode      ?? this.bluetoothMode,
     vendorId:           vendorId           ?? this.vendorId,
     productId:          productId          ?? this.productId,
     paperSize:          paperSize          ?? this.paperSize,

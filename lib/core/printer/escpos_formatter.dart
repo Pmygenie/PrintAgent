@@ -1288,12 +1288,24 @@ class EscPosFormatter {
     final safeCustomerName = (o.userCustName ?? '').trim();
     final safeCustomerPhone = (o.userCustPhone ?? '').trim();
 
-    for (final line in _wrapTitle(title)) {
+    final cancelTitleSize = PrintConfig.is80mm
+        ? _style.cancelKotTitle.escSize80
+        : _style.cancelKotTitle.escSize58;
+    final cancelTitleWidth =
+        (_width / cancelTitleSize.clamp(1, 8)).floor().clamp(1, _width);
+    for (final line in _wrapText(title.trim(), cancelTitleWidth)) {
       b += g.text(
         line,
         styles: _escStyle(_style.cancelKotTitle, align: PosAlign.center),
       );
     }
+
+    // for (final line in _wrapTitle(title)) {
+    //   b += g.text(
+    //     line,
+    //     styles: _escStyle(_style.cancelKotTitle, align: PosAlign.center),
+    //   );
+    // }
 
     b += g.text(
       lineEq,

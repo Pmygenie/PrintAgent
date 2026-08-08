@@ -10,43 +10,19 @@ import '../models/print_job.dart';
 import '../models/printer_config.dart';
 import 'bitmap/bitmap_formatter.dart';
 import 'bitmap/bitmap_print_config.dart';
+import 'bluetooth_print_lock.dart';
 import 'escpos_formatter.dart';
 import '../../drivers/printer_driver.dart';
 import '../../drivers/lan_driver.dart';
 import '../../drivers/usb_driver.dart';
-import '../../drivers/bluetooth_driver.dart'; // ✅ ONE file now
+import '../../drivers/bluetooth_driver.dart';
+import '../../drivers/windows_bt_driver.dart';
 
 class PrinterManager {
   final Map<String, PrinterConfig> _printers = {};
 
   void registerPrinter(PrinterConfig config) => _printers[config.id] = config;
   void registerAll(List<PrinterConfig> list) => list.forEach(registerPrinter);
-
-  // Future<void> print(PrintJob job) async {
-  //   final config = _printers[job.printerId] ?? _printers.values.first;
-  //   final driver = _buildDriver(config);
-  //   final bytes = await EscPosFormatter.format(job);
-
-  //   // ── Determine how many copies to print ──────────────
-  //   // kotCopies applies to KOT only — bill always prints once
-  //   final copies = job.type == PrintType.kot
-  //       ? PrintConfig.kotCopies
-  //       : PrintConfig.billCopies;
-
-  //   await driver.connect();
-  //   try {
-  //     for (int i = 0; i < copies; i++) {
-  //       await driver.sendBytes(bytes);
-
-  //       // Small gap between copies so printer doesn't choke
-  //       if (copies > 1 && i < copies - 1) {
-  //         await Future.delayed(const Duration(milliseconds: 300));
-  //       }
-  //     }
-  //   } finally {
-  //     await driver.disconnect();
-  //   }
-  // }
 
   Future<void> print(PrintJob job) async {
     final config = _printers[job.printerId] ?? _printers.values.first;
@@ -102,17 +78,28 @@ class PrinterManager {
         ? await BitmapFormatter.format(job)
         : await EscPosFormatter.format(job);
 
-    await driver.connect();
-    try {
-      for (int i = 0; i < copies; i++) {
-        await driver.sendBytes(bytes);
+    Future<void> sendToPrinter() async {
+      await driver.connect();
+      try {
+        for (int i = 0; i < copies; i++) {
+          await driver.sendBytes(bytes);
 
-        if (copies > 1 && i < copies - 1) {
-          await Future.delayed(const Duration(milliseconds: 300));
+          if (copies > 1 && i < copies - 1) {
+            await Future.delayed(const Duration(milliseconds: 300));
+          }
         }
+      } finally {
+        await driver.disconnect();
       }
-    } finally {
-      await driver.disconnect();
+    }
+
+    // Bluetooth: one job at a time across all printer queues (shared radio).
+    if (config.type == PrinterType.bluetooth) {
+      log('🔒 BT lock acquire | Order Id - ${job.order.displayOrderId}');
+      await BluetoothPrintLock.exclusive(sendToPrinter);
+      log('🔓 BT lock release | Order Id - ${job.order.displayOrderId}');
+    } else {
+      await sendToPrinter();
     }
   }
 
@@ -135,7 +122,10 @@ class PrinterManager {
         return UsbPrinterDriver(vendorId: c.vendorId!, productId: c.productId!);
 
       case PrinterType.bluetooth:
-        // ✅ No Platform.isAndroid check needed anymore
+        if (Platform.isWindows &&
+            c.bluetoothMode == BluetoothMode.classicSpp) {
+          return WindowsBluetoothDriver(macAddress: c.macAddress!);
+        }
         return BluetoothPrinterDriver(macAddress: c.macAddress!);
     }
   }
