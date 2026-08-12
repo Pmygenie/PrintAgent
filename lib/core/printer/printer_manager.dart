@@ -10,6 +10,7 @@ import '../models/print_job.dart';
 import '../models/printer_config.dart';
 import 'bitmap/bitmap_formatter.dart';
 import 'bitmap/bitmap_print_config.dart';
+import 'ble_session_registry.dart';
 import 'bluetooth_print_lock.dart';
 import 'escpos_formatter.dart';
 import '../../drivers/printer_driver.dart';
@@ -41,10 +42,11 @@ class PrinterManager {
 
       final printers = await Printing.listPrinters();
 
+      final targetName = (config.windowsPrinterName ?? '').trim().toLowerCase();
+
       Printer? targetPrinter;
       for (final p in printers) {
-        if (p.name.trim().toLowerCase() ==
-            PrintConfig.printerName.trim().toLowerCase()) {
+        if (p.name.trim().toLowerCase() == targetName) {
           targetPrinter = p;
           break;
         }
@@ -73,10 +75,34 @@ class PrinterManager {
 
       return;
     }
-    final driver = _buildDriver(config);
     final bytes = BitmapPrintConfig.enabled
         ? await BitmapFormatter.format(job)
         : await EscPosFormatter.format(job);
+
+    // BLE keep-alive: connect once per MAC, reuse session, no per-job disconnect.
+    final isBleKeepAlive = config.type == PrinterType.bluetooth &&
+        !(Platform.isWindows && config.bluetoothMode == BluetoothMode.classicSpp);
+
+    if (isBleKeepAlive) {
+      log('🔒 BT lock acquire | Order Id - ${job.order.displayOrderId}');
+      await BluetoothPrintLock.exclusive(() async {
+        await BleSessionRegistry.run(
+          macAddress: config.macAddress!,
+          action: (driver) async {
+            for (int i = 0; i < copies; i++) {
+              await driver.sendBytes(bytes);
+              if (copies > 1 && i < copies - 1) {
+                await Future.delayed(const Duration(milliseconds: 300));
+              }
+            }
+          },
+        );
+      });
+      log('🔓 BT lock release | Order Id - ${job.order.displayOrderId}');
+      return;
+    }
+
+    final driver = _buildDriver(config);
 
     Future<void> sendToPrinter() async {
       await driver.connect();
@@ -93,7 +119,7 @@ class PrinterManager {
       }
     }
 
-    // Bluetooth: one job at a time across all printer queues (shared radio).
+    // Windows classic SPP: one job at a time across queues (shared radio).
     if (config.type == PrinterType.bluetooth) {
       log('🔒 BT lock acquire | Order Id - ${job.order.displayOrderId}');
       await BluetoothPrintLock.exclusive(sendToPrinter);

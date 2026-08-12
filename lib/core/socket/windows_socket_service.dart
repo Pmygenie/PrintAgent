@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:developer';
 import 'package:http/http.dart' as http;
+import 'package:printer_agent/core/auth/auth_session_monitor.dart';
 import 'package:printer_agent/core/models/order_item.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../queue/print_queue_manager.dart';
@@ -9,6 +10,8 @@ import '../router/printer_router.dart';
 import '../models/print_job.dart';
 import '../models/restaurant_order.dart';
 import '../config/print_config.dart';
+import '../config/app_constants.dart';
+import '../services/printer_agent_config_sync_service.dart';
 
 class WindowsSocketService {
   IO.Socket? _socket;
@@ -22,23 +25,32 @@ class WindowsSocketService {
   bool _connected = false;
   bool get isConnected => _connected;
 
+  /// True while a socket-pushed config apply is in progress (avoids overlapping applies).
+  bool _applyingConfig = false;
+
   final _logController = StreamController<String>.broadcast();
   final _statusController = StreamController<bool>.broadcast();
+  final _configUpdatedController = StreamController<void>.broadcast();
 
   Stream<String> get logStream => _logController.stream;
   Stream<bool> get statusStream => _statusController.stream;
+
+  /// Fires after a `printer_agent_config_*` push was applied to local storage.
+  /// Home should rebuild queue/router/socket (same as manual refresh).
+  Stream<void> get configUpdatedStream => _configUpdatedController.stream;
 
   WindowsSocketService(this._queueManager, this._router);
 
   Future<Map<String, dynamic>?> _fetchOrderRaw(String orderId) async {
     const maxAttempts = 3; // 1 initial + 2 retries
-    final url = '${PrintConfig.apiUrl}'
+    final url = '${AppConstants.apiUrl}'
         '/api/v2/vendoremployee/order-temp-details'
         '?order_id=$orderId';
 
     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         _log('🌐 Fetching (attempt $attempt/$maxAttempts): $url');
+        _log('🔑 token: ${PrintConfig.authToken}');
 
         final response = await http.get(
           Uri.parse(url),
@@ -47,6 +59,12 @@ class WindowsSocketService {
             'Authorization': 'Bearer ${PrintConfig.authToken}',
           },
         ).timeout(const Duration(seconds: 3));
+
+        if (response.statusCode == 401) {
+          _log('❌ 401 Unauthorized — session invalid, aborting retries');
+          AuthSessionMonitor.instance.notifyExpired();
+          return null;
+        }
 
         if (response.statusCode != 200) {
           _log('❌ API error: ${response.statusCode} (attempt $attempt)');
@@ -100,13 +118,14 @@ class WindowsSocketService {
 
   Future<Map<String, dynamic>?> _fetchAggregatorOrder(String orderId) async {
     const maxAttempts = 3;
-    final url = '${PrintConfig.apiUrl}'
+    final url = '${AppConstants.apiUrl}'
         '/api/v1/vendoremployee/urbanpiper/get-order-details';
 
     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         _log(
             '🌐 Aggregator fetch (attempt $attempt/$maxAttempts) orderId=$orderId');
+        _log('🔑 token: ${PrintConfig.authToken}');
 
         final response = await http
             .post(
@@ -119,6 +138,12 @@ class WindowsSocketService {
               body: jsonEncode({'order_id': int.tryParse(orderId) ?? orderId}),
             )
             .timeout(const Duration(seconds: 5));
+
+        if (response.statusCode == 401) {
+          _log('❌ Aggregator 401 Unauthorized — session invalid, aborting retries');
+          AuthSessionMonitor.instance.notifyExpired();
+          return null;
+        }
 
         if (response.statusCode != 200) {
           _log(
@@ -147,7 +172,7 @@ class WindowsSocketService {
   }
 
   void connect() {
-    _socket = IO.io(PrintConfig.serverUrl, <String, dynamic>{
+    _socket = IO.io(AppConstants.socketUrl, <String, dynamic>{
       'transports': ['websocket'],
       'autoConnect': false,
       'reconnection': true,
@@ -158,7 +183,7 @@ class WindowsSocketService {
     _socket!.onConnect((_) {
       _connected = true;
       _statusController.add(true);
-      _log('✅ Connected to ${PrintConfig.serverUrl}');
+      _log('✅ Connected to ${AppConstants.socketUrl}');
 
       // Join restaurant room on every connect/reconnect.
       _socket!.emit('join_restaurant', {
@@ -851,6 +876,64 @@ class WindowsSocketService {
     });
 
     _log('👂 Listening: manually_print_aggregator_$restaurantId');
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PRINTER AGENT CONFIG (push from server when config is saved)
+    // ═══════════════════════════════════════════════════════════════════
+    final configChannel = 'printer_agent_config_$restaurantId';
+    _socket!.off(configChannel);
+    _socket!.on(configChannel, (data) async {
+      print('📡 Received $configChannel : $data');
+      if (_applyingConfig) {
+        _log('⏩ printer_agent_config — apply already in progress, skip');
+        return;
+      }
+      try {
+        final dynamic raw = data is String ? jsonDecode(data) : data;
+        if (raw is! Map) {
+          _log('⚠️ printer_agent_config — payload is not a Map');
+          return;
+        }
+
+        final body = Map<String, dynamic>.from(raw);
+        final configData = body['data'] is Map
+            ? Map<String, dynamic>.from(body['data'] as Map)
+            : body;
+
+        final rid = body['restaurant_id'] ?? configData['restaurant_id'];
+        if (rid != null && '$rid' != restaurantId) {
+          _log('⏩ printer_agent_config — restaurant mismatch ($rid), skip');
+          return;
+        }
+
+        final empId = configData['employee_id']?.toString();
+        if (empId != null &&
+            empId.trim().isNotEmpty &&
+            empId.trim() != PrintConfig.empId.trim()) {
+          _log(
+              '⏩ printer_agent_config — empId mismatch ($empId vs ${PrintConfig.empId}), skip');
+          return;
+        }
+
+        _applyingConfig = true;
+        final ok =
+            await PrinterAgentConfigSyncService.applyFromData(configData);
+        if (!ok) {
+          _log('❌ printer_agent_config — apply failed, local cache unchanged');
+          return;
+        }
+
+        _log('✅ printer_agent_config applied — notifying UI to reconnect');
+        if (!_configUpdatedController.isClosed) {
+          _configUpdatedController.add(null);
+        }
+      } catch (e) {
+        _log('❌ printer_agent_config error: $e');
+      } finally {
+        _applyingConfig = false;
+      }
+    });
+    _log('👂 Listening: $configChannel');
   }
 
   void _queueAggregatorStationJobs(
@@ -1029,5 +1112,6 @@ class WindowsSocketService {
     _socket?.dispose();
     _logController.close();
     _statusController.close();
+    _configUpdatedController.close();
   }
 }

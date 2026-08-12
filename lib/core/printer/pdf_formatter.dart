@@ -13,6 +13,7 @@ import 'package:printer_agent/core/profile/restaurant_profile_model.dart';
 import 'package:printer_agent/core/profile/restaurant_profile_service.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../config/print_config.dart';
+import '../config/app_constants.dart';
 import '../models/order_item.dart';
 import '../models/print_job.dart';
 import '../models/restaurant_order.dart';
@@ -175,7 +176,7 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
   static String _resolveLogoUrl(String path) {
     if (path.isEmpty) return '';
     if (path.startsWith('http')) return path;
-    final base = PrintConfig.apiUrl.replaceAll(RegExp(r'/+$'), '');
+    final base = AppConstants.apiUrl.replaceAll(RegExp(r'/+$'), '');
     return '$base/$path';
   }
 

@@ -187,6 +187,7 @@ import '../models/order_item.dart';
 import '../models/print_style_config.dart';
 import '../models/restaurant_order.dart';
 import '../config/print_config.dart';
+import '../config/app_constants.dart';
 
 class EscPosFormatter {
   static late PrintStyleConfig _style;
@@ -383,7 +384,7 @@ class EscPosFormatter {
   static String _resolveLogoUrl(String path) {
     if (path.isEmpty) return '';
     if (path.startsWith('http')) return path;
-    final base = PrintConfig.apiUrl.replaceAll(RegExp(r'/+$'), '');
+    final base = AppConstants.apiUrl.replaceAll(RegExp(r'/+$'), '');
     return '$base/$path';
   }
 

@@ -4,6 +4,7 @@ import 'package:get/get.dart';
 
 import '../models/print_style_config.dart';
 import '../services/print_style_service.dart';
+import '../services/printer_agent_config_sync_service.dart';
 
 class PrintStyleController extends GetxController {
   PrintStyleConfig config = PrintStyleConfig.defaults();
@@ -19,6 +20,9 @@ class PrintStyleController extends GetxController {
     isLoading = true;
     update();
 
+    // Best-effort: on failure this just leaves local SharedPreferences
+    // values (already the fallback) untouched.
+    await PrinterAgentConfigSyncService.sync();
     config = await PrintStyleService.getConfig();
 
     isLoading = false;

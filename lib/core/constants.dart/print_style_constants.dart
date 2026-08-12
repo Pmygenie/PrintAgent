@@ -7,9 +7,9 @@ class PrintStyleConstants {
     'Open Sans',
     'Lato',
     'Oswald',
-    'Helvetica (Sans Serif)', // Native
-    'Times New Roman',        // Native
-    'Courier',                // Native
+    'Helvetica (Sans Serif)', 
+    'Times New Roman',        
+    'Courier',                
     'Gujarati'
   ];
 

@@ -8,6 +8,7 @@ import 'package:flutter_thermal_printer/utils/printer.dart';
 import 'package:printer_agent/core/models/printer_config.dart';
 import 'package:printer_agent/core/printer/bluetooth_address.dart';
 import 'package:printer_agent/core/queue/print_queue_manager.dart';
+import 'package:printer_agent/core/services/printer_agent_config_sync_service.dart';
 import 'package:printer_agent/ui/screens/diagnostics_screen.dart';
 import '../../core/config/print_config.dart';
 
@@ -29,8 +30,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // ── Server / Identity controllers ────────────────────────────────────────
   final _restaurantIdCtrl   = TextEditingController();
   final _empIdCtrl          = TextEditingController();
-  final _serverUrlCtrl      = TextEditingController();
-  final _apiUrlCtrl         = TextEditingController();
   final _authTokenCtrl      = TextEditingController();
   final _restaurantNameCtrl = TextEditingController();
   final _kotCopiesCtrl      = TextEditingController();
@@ -57,19 +56,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // ── Multi-printer list (the core new state) ───────────────────────────────
   List<PrinterConfig> _printers = [];
 
+  // ── Remote config sync (blocks the form until the first sync attempt of
+  // the session finishes, success or failure) ───────────────────────────────
+  bool _isSyncing = true;
+
   @override
   void initState() {
     super.initState();
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    // Best-effort: on failure this just leaves local SharedPreferences
+    // values (already the fallback) untouched.
+    await PrinterAgentConfigSyncService.sync();
+    if (!mounted) return;
     _loadGlobalValues();
-    _loadSavedPrinters();
+    await _loadSavedPrinters();
+    if (!mounted) return;
+    setState(() => _isSyncing = false);
   }
 
   @override
   void dispose() {
     _restaurantIdCtrl.dispose();
     _empIdCtrl.dispose();
-    _serverUrlCtrl.dispose();
-    _apiUrlCtrl.dispose();
     _authTokenCtrl.dispose();
     _restaurantNameCtrl.dispose();
     _kotCopiesCtrl.dispose();
@@ -83,8 +94,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _loadGlobalValues() {
     _restaurantIdCtrl.text    = PrintConfig.restaurantId.toString();
     _empIdCtrl.text           = PrintConfig.empId;
-    _serverUrlCtrl.text       = PrintConfig.serverUrl;
-    _apiUrlCtrl.text          = PrintConfig.apiUrl;
     _authTokenCtrl.text       = PrintConfig.authToken;
     _restaurantNameCtrl.text  = PrintConfig.restaurantName;
     _kotCopiesCtrl.text       = PrintConfig.kotCopies.toString();
@@ -117,8 +126,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   // ── Save ─────────────────────────────────────────────────────────────────
   Future<void> _save() async {
-    if (_serverUrlCtrl.text.isEmpty || _authTokenCtrl.text.isEmpty || _empIdCtrl.text.isEmpty) {
-      _showError('Server URL, Token, and Emp ID are required');
+    if (_empIdCtrl.text.isEmpty) {
+      _showError('Emp ID is required');
       return;
     }
 
@@ -133,11 +142,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
 
     // Write global config to memory
-    PrintConfig.restaurantId             = int.tryParse(_restaurantIdCtrl.text) ?? 0;
+    // Restaurant ID is no longer editable here — it comes exclusively from
+    // the restaurant profile API (see RestaurantProfileRepository) and is
+    // only displayed read-only above.
     PrintConfig.empId                    = _empIdCtrl.text.trim();
-    PrintConfig.serverUrl                = _serverUrlCtrl.text.trim();
-    PrintConfig.apiUrl                   = _apiUrlCtrl.text.trim();
-    PrintConfig.authToken                = _authTokenCtrl.text.trim();
+    // Socket URL / API URL are no longer editable here — they are hardcoded
+    // in AppConstants, the sole source of truth (see app_constants.dart).
+    // Auth token is no longer editable here — it comes exclusively from
+    // Login (see LoginScreen) and is only displayed read-only below.
     PrintConfig.restaurantName           = _restaurantNameCtrl.text.trim();
     PrintConfig.kotCopies                = int.tryParse(_kotCopiesCtrl.text) ?? 1;
     PrintConfig.billCopies               = int.tryParse(_billCopiesCtrl.text) ?? 1;
@@ -196,6 +208,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  void _copyToken() {
+    if (PrintConfig.authToken.isEmpty) return;
+    Clipboard.setData(ClipboardData(text: PrintConfig.authToken));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Token copied to clipboard'), duration: Duration(seconds: 2)),
+    );
+  }
+
   // ── Add / Edit printer ────────────────────────────────────────────────────
   void _showAddPrinterSheet({PrinterConfig? existing, int? editIndex}) {
     showModalBottomSheet(
@@ -234,27 +254,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
           TextButton.icon(
             icon:  const Icon(Icons.save, color: Colors.white),
             label: const Text('Save', style: TextStyle(color: Colors.white)),
-            onPressed: _save,
+            onPressed: _isSyncing ? null : _save,
           ),
         ],
       ),
-      body: ListView(
+      body: _isSyncing
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
         padding: const EdgeInsets.all(16),
         children: [
 
-          // ── Server ──────────────────────────────────────────────────────
-          _sectionHeader('🌐 Server'),
-          _field(controller: _serverUrlCtrl, label: 'Socket URL',
-              hint: 'http://socket.mygenie.online', icon: Icons.electrical_services),
-          _field(controller: _apiUrlCtrl, label: 'API URL',
-              hint: 'https://manage.mygenie.online', icon: Icons.api),
+          // ── Account ─────────────────────────────────────────────────────
+          _sectionHeader('🔐 Account'),
           _tokenField(),
           const SizedBox(height: 16),
 
           // ── Identity ────────────────────────────────────────────────────
           _sectionHeader('🏪 Identity'),
-          _field(controller: _restaurantIdCtrl, label: 'Restaurant ID',
-              hint: '1', icon: Icons.restaurant, numeric: true),
+          _field(controller: _restaurantIdCtrl, label: 'Restaurant ID (from Profile)',
+              hint: '1', icon: Icons.restaurant, numeric: true, readOnly: true),
           _field(controller: _empIdCtrl, label: 'Employee ID (printer_agent_id)',
               hint: '002', icon: Icons.badge),
           _field(controller: _restaurantNameCtrl, label: 'Restaurant Name',
@@ -513,11 +531,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required String hint,
     required IconData icon,
     bool numeric = false,
+    bool readOnly = false,
     List<TextInputFormatter>? inputFormatters,
   }) => Padding(
     padding: const EdgeInsets.only(bottom: 12),
     child: TextField(
       controller: controller,
+      readOnly: readOnly,
       keyboardType: numeric ? TextInputType.number : TextInputType.text,
       inputFormatters: inputFormatters,
       decoration: InputDecoration(
@@ -528,19 +548,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ),
   );
 
+  /// Read-only — the auth token now comes exclusively from Login and can no
+  /// longer be edited or pasted here. Shown for visibility/debugging only.
   Widget _tokenField() => Padding(
     padding: const EdgeInsets.only(bottom: 12),
     child: TextField(
       controller: _authTokenCtrl,
       obscureText: _obscureToken,
+      readOnly: true,
       decoration: InputDecoration(
-        labelText: 'Auth Token (Bearer)',
-        hintText: 'paste your token here...',
+        labelText: 'Auth Token (from Login)',
         prefixIcon: const Icon(Icons.key),
         border: const OutlineInputBorder(), filled: true,
-        suffixIcon: IconButton(
-          icon: Icon(_obscureToken ? Icons.visibility : Icons.visibility_off),
-          onPressed: () => setState(() => _obscureToken = !_obscureToken),
+        suffixIcon: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: Icon(_obscureToken ? Icons.visibility : Icons.visibility_off),
+              onPressed: () => setState(() => _obscureToken = !_obscureToken),
+            ),
+            IconButton(
+              icon: const Icon(Icons.copy, size: 20),
+              tooltip: 'Copy',
+              onPressed: _copyToken,
+            ),
+          ],
         ),
       ),
     ),

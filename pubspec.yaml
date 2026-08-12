@@ -20,7 +20,7 @@ dependencies:
 
   # ── Printer drivers (LAN + USB + Android BT)─
   # flutter_pos_printer_platform_image_3: ^1.2.1
-  flutter_thermal_printer: ^1.2.1+1
+  flutter_thermal_printer: ^1.2.4
   thermal_printer_plus: ^1.0.0
 
   # ── Windows Bluetooth only ──────────────────

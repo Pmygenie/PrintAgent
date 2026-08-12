@@ -9,12 +9,25 @@ import 'escpos_bluetooth_send.dart';
 import 'printer_driver.dart';
 
 /// BLE thermal printer driver (Android + Windows via flutter_thermal_printer).
+///
+/// Connection lifecycle for keep-alive is owned by [BleSessionRegistry].
+/// [connect] performs a clean scan→match→stopScan→GATT connect. Scans are
+/// serialized process-wide to avoid Android "could not find callback wrapper".
 class BluetoothPrinterDriver implements PrinterDriver {
   final String macAddress;
   final _plugin = FlutterThermalPrinter.instance;
   Printer? _printer;
 
+  /// Serializes BLE scans so stop/start cannot overlap across printers.
+  static Future<void> _scanTail = Future<void>.value();
+
   BluetoothPrinterDriver({required this.macAddress});
+
+  bool get isConnected => _printer != null;
+
+  String get _logMac =>
+      BluetoothAddress.extractPrinterMac(macAddress) ??
+      BluetoothAddress.displayMac(macAddress);
 
   bool _matches(Printer p) {
     final addr = p.address;
@@ -22,7 +35,9 @@ class BluetoothPrinterDriver implements PrinterDriver {
     return BluetoothAddress.samePrinter(addr, macAddress);
   }
 
-  /// Windows WinBle init races — retry until ready.
+  /// flutter_thermal_printer 1.2.4+ uses `universal_ble` on every platform
+  /// (including Windows), which manages its own init state safely — repeated
+  /// calls to `getPrinters()` no longer race or throw "already initialized".
   Future<void> _startBleScan() async {
     Object? lastError;
     for (var attempt = 0; attempt < 10; attempt++) {
@@ -41,33 +56,60 @@ class BluetoothPrinterDriver implements PrinterDriver {
     throw lastError ?? Exception('BLE scan failed to initialize');
   }
 
+  static Future<T> _withScanExclusive<T>(Future<T> Function() action) async {
+    final previous = _scanTail;
+    final gate = Completer<void>();
+    _scanTail = gate.future;
+    await previous;
+    try {
+      return await action();
+    } finally {
+      // Let Android tear down the scanner callback before the next startScan.
+      await Future.delayed(const Duration(milliseconds: 350));
+      if (!gate.isCompleted) gate.complete();
+    }
+  }
+
   @override
   Future<void> connect() async {
-    final completer = Completer<Printer>();
+    await _withScanExclusive(() async {
+      final completer = Completer<Printer>();
+      StreamSubscription<List<Printer>>? sub;
 
-    await _startBleScan();
+      try {
+        // Listen BEFORE starting scan — devicesStream is broadcast (no replay).
+        sub = _plugin.devicesStream.listen((List<Printer> found) {
+          for (final p in found) {
+            if (_matches(p) && !completer.isCompleted) {
+              completer.complete(p);
+            }
+          }
+        });
 
-    final sub = _plugin.devicesStream.listen((List<Printer> found) {
-      for (final p in found) {
-        if (_matches(p) && !completer.isCompleted) {
-          completer.complete(p);
-        }
+        await _startBleScan();
+
+        _printer = await completer.future.timeout(
+          Duration(seconds: Platform.isWindows ? 20 : 25),
+          onTimeout: () {
+            throw Exception('❌ BT printer not found: $macAddress');
+          },
+        );
+
+        await _plugin.stopScan();
+        await Future.delayed(const Duration(milliseconds: 200));
+
+        await _plugin.connect(_printer!);
+        print('[BT] GATT CONNECTED $_logMac');
+      } catch (e) {
+        _printer = null;
+        rethrow;
+      } finally {
+        await sub?.cancel();
+        try {
+          await _plugin.stopScan();
+        } catch (_) {}
       }
     });
-
-    _printer = await completer.future.timeout(
-      Duration(seconds: Platform.isWindows ? 20 : 10),
-      onTimeout: () {
-        sub.cancel();
-        _plugin.stopScan();
-        throw Exception('❌ BT printer not found: $macAddress');
-      },
-    );
-
-    await sub.cancel();
-    await _plugin.stopScan();
-    await _plugin.connect(_printer!);
-    print('✅ BT connected: $macAddress');
   }
 
   @override
@@ -93,9 +135,12 @@ class BluetoothPrinterDriver implements PrinterDriver {
 
   @override
   Future<void> disconnect() async {
-    if (_printer != null) {
-      await _plugin.disconnect(_printer!);
-      _printer = null;
-    }
+    final printer = _printer;
+    if (printer == null) return;
+    _printer = null;
+    try {
+      await _plugin.disconnect(printer);
+    } catch (_) {}
+    print('[BT] DISCONNECTED $_logMac');
   }
 }

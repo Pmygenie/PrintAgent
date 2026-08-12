@@ -1,6 +1,7 @@
 import 'dart:async';
 import '../models/printer_config.dart';
 import '../models/print_job.dart';
+import '../printer/ble_session_registry.dart';
 import '../printer/printer_manager.dart';
 import 'print_queue.dart';
 
@@ -88,7 +89,8 @@ class PrintQueueManager {
 
   /// Disposes all queues and closes the merged status stream.
   /// Must be called before creating a new [PrintQueueManager] on reconnect.
-  void dispose() {
+  Future<void> dispose() async {
+    await BleSessionRegistry.disconnectAll();
     for (final q in _queues.values) {
       q.dispose();
     }

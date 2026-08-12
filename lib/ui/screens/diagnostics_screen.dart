@@ -188,7 +188,10 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
     }
   }
 
-  /// Windows WinBle init races — retry getPrinters until ready.
+  /// flutter_thermal_printer 1.2.4+ uses `universal_ble` on every platform
+  /// (including Windows), which manages its own init state safely — repeated
+  /// calls to `getPrinters()` no longer race or throw "already initialized".
+  /// Same retry loop for all platforms.
   Future<void> _startBleScanWithRetry() async {
     Object? lastError;
     for (var attempt = 0; attempt < 10; attempt++) {

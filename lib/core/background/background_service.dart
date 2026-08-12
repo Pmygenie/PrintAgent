@@ -10,6 +10,7 @@ import '../router/printer_router.dart';
 import '../models/print_job.dart';
 import '../models/restaurant_order.dart';
 import '../config/print_config.dart';
+import '../config/app_constants.dart';
 import 'dart:convert';
 
 const _notifChannelId = 'print_agent_channel';
@@ -74,7 +75,7 @@ void onBackgroundServiceStart(ServiceInstance service) async {
   final Set<int> printedOrderIds = {};
 
   void connectSocket() {
-    socket = IO.io(PrintConfig.serverUrl, <String, dynamic>{
+    socket = IO.io(AppConstants.socketUrl, <String, dynamic>{
       'transports':           ['websocket'],
       'autoConnect':          true,
       'reconnection':         true,
@@ -223,7 +224,10 @@ void onBackgroundServiceStart(ServiceInstance service) async {
   });
 
   // Listen for stop command from UI
-  service.on('stop').listen((_) => service.stopSelf());
+  service.on('stop').listen((_) async {
+    await queueManager.dispose();
+    service.stopSelf();
+  });
 
   // Heartbeat — proves service is alive
   Timer.periodic(const Duration(seconds: 30), (_) {

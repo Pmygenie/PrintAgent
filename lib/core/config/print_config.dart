@@ -213,8 +213,7 @@ class PrintConfig {
   static int usbVendorId = 19267;
   static int usbProductId = 14384;
   static String empId = "002";
-  static String apiUrl = 'https://manage.mygenie.online';
-  static String serverUrl = 'https://socket.mygenie.online';
+  // apiUrl / serverUrl removed — see AppConstants, the sole source of truth.
   static String authToken =
       '5uC0OjRzJ4JSquaVQt4fV3AbosgwOSBiiz7puApXesmjL55BLRCjfuKS7DiPQ4u7M7CN7kVKEt54FcPaUVNztniRTcuuBOdLWKfkFtBRK0rqB5aKwdqdcnao';
 
@@ -284,8 +283,6 @@ class PrintConfig {
     billCopies = p.getInt('billCopies') ?? 1;
     restaurantId = p.getInt('restaurantId') ?? 618;
     empId = p.getString('empId') ?? '002';
-    apiUrl = p.getString('apiUrl') ?? 'https://preprod.mygenie.online';
-    serverUrl = p.getString('serverUrl') ?? 'http://presocket.mygenie.online';
     authToken = p.getString('authToken') ?? '';
     printerName = p.getString('printerName') ?? 'Everycom-printer';
     restaurantName = p.getString('restaurantName') ?? 'Restaurant';
@@ -338,8 +335,6 @@ class PrintConfig {
     await p.setInt('billCopies', billCopies);
     await p.setInt('restaurantId', restaurantId);
     await p.setString('empId', empId);
-    await p.setString('apiUrl', apiUrl);
-    await p.setString('serverUrl', serverUrl);
     await p.setString('authToken', authToken);
     await p.setString('printerName', printerName);
     await p.setString('restaurantName', restaurantName);
@@ -366,5 +361,5 @@ class PrintConfig {
   }
 
   static bool get isConfigured =>
-      serverUrl.isNotEmpty && authToken.isNotEmpty && printerName.isNotEmpty;
+      authToken.isNotEmpty && printerName.isNotEmpty;
 }

@@ -135,6 +135,7 @@ import 'core/profile/restaurant_profile_api.dart';
 import 'core/profile/restaurant_profile_repository.dart';
 import 'core/profile/restaurant_profile_store.dart';
 import 'ui/screens/home_screen.dart';
+import 'ui/screens/login_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -297,13 +298,23 @@ class PrintAgentApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Gate the whole app behind login: no stored token → Login screen first.
+    // Once logged in (or on a session that already has a token), go straight
+    // to Home, same as before this gate was added.
+    final isLoggedIn = PrintConfig.authToken.trim().isNotEmpty;
+
     return GetMaterialApp(
       title: 'Print Agent',
       theme: ThemeData.dark(useMaterial3: true),
-      home: HomeScreen(
-        windowsSocket: windowsSocket,
-        queueManager:  queueManager,
-      ),
+      home: isLoggedIn
+          ? HomeScreen(
+              windowsSocket: windowsSocket,
+              queueManager:  queueManager,
+            )
+          : LoginScreen(
+              windowsSocket: windowsSocket,
+              queueManager:  queueManager,
+            ),
       debugShowCheckedModeBanner: false,
     );
   }

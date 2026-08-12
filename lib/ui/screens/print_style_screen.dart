@@ -10,6 +10,14 @@ class PrintStyleScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // This screen is pushed via a plain `Navigator.push(MaterialPageRoute)`,
+    // not `Get.to()`, so GetX's route-based auto-disposal never kicks in for
+    // it (that only fires for `GetPageRoute`s being removed/replaced — see
+    // `GetObserver.didRemove`/`didReplace`). Without this explicit delete,
+    // `Get.put()` below would keep returning the SAME controller instance —
+    // loaded once on the very first visit — for the rest of the app session,
+    // so later screen opens would never reflect newer synced/saved config.
+    Get.delete<PrintStyleController>();
     final controller = Get.put(PrintStyleController());
 
     return Scaffold(

@@ -4,7 +4,7 @@ import 'dart:async';
 ///
 /// Each physical printer has its own [PrintQueue], so Bar + Billing can start
 /// printing at the same time. Classic/BLE radios cannot safely share the link —
-/// this lock ensures only one BT connect→send→disconnect runs at a time.
+/// this lock ensures only one BT connect/reconnect + sendBytes runs at a time.
 /// USB/LAN jobs never take this lock.
 class BluetoothPrintLock {
   BluetoothPrintLock._();

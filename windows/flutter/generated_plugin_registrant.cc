@@ -12,6 +12,7 @@
 #include <printing/printing_plugin.h>
 #include <system_tray/system_tray_plugin.h>
 #include <thermal_printer_plus/thermal_printer_plugin.h>
+#include <universal_ble/universal_ble_plugin_c_api.h>
 
 void RegisterPlugins(flutter::PluginRegistry* registry) {
   FlutterThermalPrinterPluginCApiRegisterWithRegistrar(
@@ -26,4 +27,6 @@ void RegisterPlugins(flutter::PluginRegistry* registry) {
       registry->GetRegistrarForPlugin("SystemTrayPlugin"));
   ThermalPrinterPluginRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("ThermalPrinterPlugin"));
+  UniversalBlePluginCApiRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("UniversalBlePluginCApi"));
 }

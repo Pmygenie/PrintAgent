@@ -7,6 +7,7 @@ class PrintQueue {
   final Queue<PrintJob> _queue = Queue();
   final PrinterManager _manager;
   bool _isProcessing = false;
+  bool _disposed = false;
 
   PrinterManager get manager => _manager;
 
@@ -17,13 +18,14 @@ class PrintQueue {
   PrintQueue(this._manager);
 
   void addJob(PrintJob job) {
+    if (_disposed) return;
     _queue.add(job);
     _emit('=====> QUEUED | ${job.id} | Order Id -${job.order.displayOrderId}');
     _processNext();
   }
 
   Future<void> _processNext() async {
-    if (_isProcessing || _queue.isEmpty) return;
+    if (_disposed || _isProcessing || _queue.isEmpty) return;
     _isProcessing = true;
     final job = _queue.first;
 
@@ -53,14 +55,21 @@ class PrintQueue {
       }
     } finally {
       _isProcessing = false;
-      _processNext();
+      if (!_disposed) _processNext();
     }
   }
 
   void _emit(String msg) {
     print('[Queue] $msg');
-    _statusController.add(msg);
+    if (!_disposed && !_statusController.isClosed) {
+      _statusController.add(msg);
+    }
   }
 
-  void dispose() => _statusController.close();
+  void dispose() {
+    _disposed = true;
+    if (!_statusController.isClosed) {
+      _statusController.close();
+    }
+  }
 }

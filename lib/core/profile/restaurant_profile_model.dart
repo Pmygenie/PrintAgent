@@ -1,4 +1,5 @@
 class RestaurantProfileModel {
+  final int restaurantId;
   final String restaurantName;
   final String restaurantPhone;
   final String restaurantEmail;
@@ -15,6 +16,7 @@ class RestaurantProfileModel {
   final String kotLanguage;
 
   const RestaurantProfileModel({
+    this.restaurantId = 0,
     required this.restaurantName,
     required this.restaurantPhone,
     required this.restaurantEmail,
@@ -64,6 +66,7 @@ class RestaurantProfileModel {
         : <String, dynamic>{};
 
     return RestaurantProfileModel(
+      restaurantId: int.tryParse(restaurant['id']?.toString() ?? '') ?? 0,
       restaurantName: restaurant['name']?.toString() ?? '',
       restaurantPhone: json['phone']?.toString() ?? '',
       restaurantEmail: restaurant['email']?.toString() ?? '',
@@ -83,6 +86,7 @@ class RestaurantProfileModel {
 
   factory RestaurantProfileModel.fromJson(Map<String, dynamic> json) {
     return RestaurantProfileModel(
+      restaurantId: int.tryParse(json['restaurantId']?.toString() ?? '') ?? 0,
       restaurantName: json['restaurantName']?.toString() ?? '',
       restaurantPhone: json['restaurantPhone']?.toString() ?? '',
       restaurantEmail: json['restaurantEmail']?.toString() ?? '',
@@ -102,6 +106,7 @@ class RestaurantProfileModel {
 
   Map<String, dynamic> toJson() {
     return {
+      'restaurantId': restaurantId,
       'restaurantName': restaurantName,
       'restaurantPhone': restaurantPhone,
       'restaurantEmail': restaurantEmail,

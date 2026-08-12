@@ -3,12 +3,18 @@ import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:printer_agent/ui/screens/print_style_screen.dart';
+import 'package:printer_agent/core/auth/auth_logout_api.dart';
+import 'package:printer_agent/core/auth/auth_session_monitor.dart';
 import 'package:printer_agent/core/config/print_config.dart';
 import 'package:printer_agent/core/models/printer_config.dart';
+import 'package:printer_agent/core/printer/ble_session_registry.dart';
 import 'package:printer_agent/core/profile/restaurant_profile_api.dart';
+import 'package:printer_agent/core/profile/restaurant_profile_model.dart';
 import 'package:printer_agent/core/profile/restaurant_profile_repository.dart';
 import 'package:printer_agent/core/profile/restaurant_profile_store.dart';
+import 'package:printer_agent/core/services/printer_agent_config_sync_service.dart';
 import 'package:printer_agent/ui/screens/diagnostics_screen.dart';
+import 'package:printer_agent/ui/screens/login_screen.dart';
 import 'package:printer_agent/ui/screens/settings_screen.dart';
 import '../../core/queue/print_queue_manager.dart';
 import '../../core/router/printer_router.dart';
@@ -35,10 +41,20 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription? _queueSub;
   StreamSubscription? _socketStatusSub;
   StreamSubscription? _socketLogSub;
+  StreamSubscription? _sessionExpiredSub;
+  StreamSubscription? _configUpdatedSub;
+
+  // On logout we hand the live socket/queue off to the next screen instead
+  // of tearing them down — they're one-shot objects (their streams are
+  // closed forever once disconnect()/dispose() runs), so disposing them
+  // here would break printing once the user logs back in.
+  bool _keepSocketAliveOnDispose = false;
+  bool _isReconnecting = false;
 
   final List<String> _logs = [];
   bool   _connected   = false;
   bool   _isRefreshingProfile = false;
+  bool   _isLoggingOut = false;
   int    _queueLength = 0;
   String _lastPrint   = '—';
 
@@ -62,17 +78,28 @@ class _HomeScreenState extends State<HomeScreen> {
         store: RestaurantProfileStore(),
       );
 
-      final profile = await repo.refresh(token: token);
+      // Run both refreshes together — one button press, both syncs.
+      final results = await Future.wait<dynamic>([
+        repo.refresh(token: token),
+        PrinterAgentConfigSyncService.sync(force: true),
+      ]);
+      final profile = results[0] as RestaurantProfileModel?;
+      final configSynced = results[1] as bool;
+
+      // Config changed — apply it to the live socket/queue immediately.
+      if (configSynced) {
+        await _reconnect();
+      }
 
       if (!mounted) return;
+      final profileMsg = profile != null && profile.isNotEmpty
+          ? 'Restaurant profile refreshed successfully'
+          : 'Profile refresh completed, but no data found';
+      final configMsg = configSynced
+          ? 'printer agent config synced'
+          : 'printer agent config sync failed (using cached settings)';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            profile != null && profile.isNotEmpty
-                ? 'Restaurant profile refreshed successfully'
-                : 'Profile refresh completed, but no data found',
-          ),
-        ),
+        SnackBar(content: Text('$profileMsg • $configMsg')),
       );
 
       if (profile != null && profile.isNotEmpty) {
@@ -88,6 +115,85 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // ── Logout ───────────────────────────────────────────────────────────────
+  Future<void> _logout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Logout'),
+        content: const Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Logout', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _isLoggingOut = true);
+    try {
+      final token = PrintConfig.authToken;
+      if (token.isEmpty) {
+        throw Exception('Not logged in');
+      }
+      await AuthLogoutApi().logout(token: token);
+      await _completeLocalLogoutAndNavigate();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Logout failed: ${e.toString().replaceFirst('Exception: ', '')}')),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoggingOut = false);
+    }
+  }
+
+  /// Clears the local token and navigates to [LoginScreen], keeping the
+  /// live socket/queue alive across the transition (see
+  /// [_keepSocketAliveOnDispose]). Shared by the manual Logout button and
+  /// the forced-logout path triggered by [AuthSessionMonitor].
+  Future<void> _completeLocalLogoutAndNavigate({String? message}) async {
+    PrintConfig.authToken = '';
+    await PrintConfig.save();
+
+    // Drop keep-alive BLE links on logout (queue/socket may stay alive).
+    await BleSessionRegistry.disconnectAll();
+
+    _keepSocketAliveOnDispose = true;
+
+    if (!mounted) return;
+    if (message != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    }
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (_) => LoginScreen(
+          windowsSocket: _socketService,
+          queueManager: _queueManager,
+        ),
+      ),
+      (route) => false,
+    );
+  }
+
+  /// Any authenticated API call (profile refresh, config sync, order fetch,
+  /// or the logout call itself) can report a 401 via [AuthSessionMonitor].
+  /// That means the token is already dead server-side, so there's nothing
+  /// left to preserve — force a clean local logout instead of leaving the
+  /// user stuck on a session that can never succeed again.
+  void _onSessionExpired() {
+    if (!mounted) return;
+    _completeLocalLogoutAndNavigate(
+      message: 'Session expired — please log in again',
+    );
+  }
+
   // ── Lifecycle ────────────────────────────────────────────────────────────
   @override
   void initState() {
@@ -95,6 +201,8 @@ class _HomeScreenState extends State<HomeScreen> {
     _socketService = widget.windowsSocket;
     _queueManager  = widget.queueManager;
     _setupListeners();
+    _sessionExpiredSub =
+        AuthSessionMonitor.instance.sessionExpired.listen((_) => _onSessionExpired());
   }
 
   @override
@@ -102,8 +210,12 @@ class _HomeScreenState extends State<HomeScreen> {
     _queueSub?.cancel();
     _socketStatusSub?.cancel();
     _socketLogSub?.cancel();
-    _socketService?.disconnect();
-    _queueManager?.dispose();
+    _configUpdatedSub?.cancel();
+    _sessionExpiredSub?.cancel();
+    if (!_keepSocketAliveOnDispose) {
+      _socketService?.disconnect();
+      _queueManager?.dispose();
+    }
     super.dispose();
   }
 
@@ -140,6 +252,14 @@ class _HomeScreenState extends State<HomeScreen> {
     _queueSub?.cancel();
     _socketStatusSub?.cancel();
     _socketLogSub?.cancel();
+    _configUpdatedSub?.cancel();
+
+    // The socket may have already connected before this screen existed to
+    // listen (e.g. it connects in the background while Login is showing, or
+    // it's a still-live instance handed over from a prior HomeScreen). Seed
+    // the badge from the current state instead of waiting for a *new*
+    // connect/disconnect event that may never come.
+    _connected = _socketService?.isConnected ?? false;
 
     // Queue status from ALL printers (merged stream with per-printer labels)
     _queueSub = _queueManager?.statusStream.listen((msg) {
@@ -170,30 +290,42 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     _socketLogSub = _socketService?.logStream.listen(_addLog);
+
+    // Socket-pushed printer-agent-config was applied — rebuild queue/router.
+    _configUpdatedSub = _socketService?.configUpdatedStream.listen((_) async {
+      _addLog('♻️ Socket config applied — reconnecting printers...');
+      await _reconnect();
+    });
   }
 
   // ── Reconnect — rebuild everything from saved configs ────────────────────
   Future<void> _reconnect() async {
-    _socketService?.disconnect();
-    _queueManager?.dispose();
+    if (_isReconnecting) return;
+    _isReconnecting = true;
+    try {
+      _socketService?.disconnect();
+      await _queueManager?.dispose();
 
-    final savedPrinters = await PrinterConfigStorage.load();
-    final printers = savedPrinters.isNotEmpty
-        ? savedPrinters
-        : [_buildFallbackConfig()];
+      final savedPrinters = await PrinterConfigStorage.load();
+      final printers = savedPrinters.isNotEmpty
+          ? savedPrinters
+          : [_buildFallbackConfig()];
 
-    final newQueueManager = PrintQueueManager()..registerAll(printers);
-    final newRouter       = PrinterRouter(printers);
-    final newSocket       = WindowsSocketService(newQueueManager, newRouter)..connect();
+      final newQueueManager = PrintQueueManager()..registerAll(printers);
+      final newRouter       = PrinterRouter(printers);
+      final newSocket       = WindowsSocketService(newQueueManager, newRouter)..connect();
 
-    if (!mounted) return;
-    setState(() {
-      _socketService = newSocket;
-      _queueManager  = newQueueManager;
-    });
+      if (!mounted) return;
+      setState(() {
+        _socketService = newSocket;
+        _queueManager  = newQueueManager;
+      });
 
-    _addLog('♻️ Reconnected — ${printers.length} printer(s) registered');
-    _setupListeners();
+      _addLog('♻️ Reconnected — ${printers.length} printer(s) registered');
+      _setupListeners();
+    } finally {
+      _isReconnecting = false;
+    }
   }
 
   /// Fallback single printer built from global PrintConfig settings.
@@ -277,6 +409,16 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
+          ),
+          IconButton(
+            onPressed: _isLoggingOut ? null : _logout,
+            icon: _isLoggingOut
+                ? const SizedBox(
+                    width: 18, height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.logout),
+            tooltip: 'Logout',
           ),
         ],
       ),

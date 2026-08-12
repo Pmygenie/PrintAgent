@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:printer_agent/core/config/print_config.dart';
+import 'package:printer_agent/core/config/app_constants.dart';
 import 'package:printer_agent/core/models/order_item.dart';
 import 'package:printer_agent/core/models/print_style_config.dart';
 import 'package:printer_agent/core/models/restaurant_order.dart';
@@ -345,7 +345,7 @@ class BillRenderer {
   ) async {
     final rawPath =
         profile.billLogo.isNotEmpty ? profile.billLogo : profile.restaurantLogo;
-    final url = ReceiptBusinessLogic.resolveLogoUrl(rawPath, PrintConfig.apiUrl);
+    final url = ReceiptBusinessLogic.resolveLogoUrl(rawPath, AppConstants.apiUrl);
     if (url.isEmpty) return null;
     try {
       final res =
