@@ -179,6 +179,7 @@ import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 import 'package:qr/qr.dart';
+import 'package:printer_agent/core/printer/bitmap/receipt_business_logic.dart';
 import 'package:printer_agent/core/profile/restaurant_profile_model.dart';
 import 'package:printer_agent/core/profile/restaurant_profile_service.dart';
 import 'package:printer_agent/core/services/print_style_service.dart';
@@ -228,7 +229,14 @@ class EscPosFormatter {
       final upiQrImage = (!isAggregator &&
               PrintConfig.upiQrEnabled &&
               PrintConfig.upiId.trim().isNotEmpty)
-          ? _buildQrBitmap(PrintConfig.upiQrDataForBill(job.order.billData),
+          ? _buildQrBitmap(
+              PrintConfig.upiQrDataForBill(
+                job.order.billData,
+                amountOverride: ReceiptBusinessLogic.printedBillTotal(
+                  job.order.billData,
+                  restaurantProfile,
+                ),
+              ),
               _style.escUpiQrSizeMm)
           : null;
       final feedbackQrImage = (!isAggregator && PrintConfig.feedbackQrEnabled)
@@ -709,10 +717,8 @@ class EscPosFormatter {
     final vatTax = d('vat_tax');
     final packingCharge = d('packing_charge') ?? 0;
     final grantAmount = d('grant_amount');
-    final paymentAmount = d('payment_amount');
     final roomAdvance = d('room_advance_pay');
     final roomPending = d('room_remaining_pay');
-    final roundOff = d('');
     final isAggregator = bill['is_aggregator'] == true;
     final paymentStatus = bill['payment_status']?.toString() ?? '';
     final paymentMethod = bill['payment_method']?.toString() ?? '';
@@ -871,11 +877,21 @@ class EscPosFormatter {
       );
     }
 
+    final totalAmount =
+        ReceiptBusinessLogic.printedBillTotal(bill, profile);
+    final roundOff = ReceiptBusinessLogic.roundOffAmount(bill, profile);
+    if (roundOff.abs() >= 0.005) {
+      b += g.text(
+        _alignRightLabelValue('Round Off', roundOff.toStringAsFixed(2)),
+        styles: _escStyle(_style.billAmountLine),
+      );
+    }
+
     b += g.text(lineDashes,
         styles: const PosStyles(align: PosAlign.center, bold: true));
 
     // Total — room = payment_amount, normal = grant_amount
-    final totalAmount = isRoomOrder ? paymentAmount : grantAmount;
+    // Rounded when profile.total_round == Yes.
     final paymentLabel = isRoomOrder || isAggregator ? '' : payLabel();
     if (paymentLabel.isEmpty ||
         _sameEscStyle(_style.billTotal, _style.billPaidBy)) {

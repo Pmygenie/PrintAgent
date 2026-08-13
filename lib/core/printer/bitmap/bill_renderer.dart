@@ -179,7 +179,6 @@ class BillRenderer {
     final vatTax = ReceiptBusinessLogic.billAmount(bill, 'vat_tax');
     final packingCharge = ReceiptBusinessLogic.billAmount(bill, 'packing_charge');
     final grantAmount = ReceiptBusinessLogic.billAmount(bill, 'grant_amount');
-    final paymentAmount = ReceiptBusinessLogic.billAmount(bill, 'payment_amount');
     final roomAdvance = ReceiptBusinessLogic.billAmount(bill, 'room_advance_pay');
     final roomPending = ReceiptBusinessLogic.billAmount(bill, 'room_remaining_pay');
     final isAggregator = ReceiptBusinessLogic.isAggregator(bill);
@@ -240,9 +239,15 @@ class BillRenderer {
       canvas.drawLabelValue('VAT', vatTax.toStringAsFixed(2), amountStyle);
     }
 
-    canvas.drawRule(solid);
+    final totalAmount =
+        ReceiptBusinessLogic.printedBillTotal(bill, profile);
+    final roundOff = ReceiptBusinessLogic.roundOffAmount(bill, profile);
+    if (roundOff.abs() >= 0.005) {
+      canvas.drawLabelValue(
+          'Round Off', roundOff.toStringAsFixed(2), amountStyle);
+    }
 
-    final totalAmount = isRoomOrder ? paymentAmount : grantAmount;
+    canvas.drawRule(solid);
     final totalLabel = isRoomOrder || isAggregator
         ? 'TOTAL'
         : 'TOTAL ${ReceiptBusinessLogic.payLabel(bill)}';

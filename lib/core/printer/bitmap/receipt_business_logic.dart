@@ -130,6 +130,38 @@ class ReceiptBusinessLogic {
   static bool isAggregator(Map<String, dynamic> bill) =>
       bill['is_aggregator'] == true;
 
+  static int getRoundUpValue(double value, {double threshold = 0.10}) {
+    final decimal =
+        double.parse((value - value.floor()).toStringAsFixed(2));
+    return decimal >= threshold ? value.ceil() : value.floor();
+  }
+
+  static bool isTotalRoundEnabled(RestaurantProfileModel profile) =>
+      profile.totalRound.trim().toLowerCase() == 'yes';
+
+  static double rawBillTotal(Map<String, dynamic> bill) {
+    final grantAmount = billAmount(bill, 'grant_amount');
+    final paymentAmount = billAmount(bill, 'payment_amount');
+    return isRoomOrder(bill) ? paymentAmount : grantAmount;
+  }
+
+  static double printedBillTotal(
+    Map<String, dynamic> bill,
+    RestaurantProfileModel profile,
+  ) {
+    final raw = rawBillTotal(bill);
+    if (!isTotalRoundEnabled(profile)) return raw;
+    return getRoundUpValue(raw).toDouble();
+  }
+
+  static double roundOffAmount(
+    Map<String, dynamic> bill,
+    RestaurantProfileModel profile,
+  ) {
+    if (!isTotalRoundEnabled(profile)) return 0;
+    return printedBillTotal(bill, profile) - rawBillTotal(bill);
+  }
+
   static bool get showBillItemDate =>
       PrintConfig.is80mm && PrintConfig.showItemDateOn80mm;
 

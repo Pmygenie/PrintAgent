@@ -9,6 +9,7 @@ import 'package:printer_agent/core/models/print_style_config.dart';
 import 'package:printer_agent/core/printer/receipt_text_renderer.dart';
 import 'package:printer_agent/core/services/print_style_service.dart';
 import 'package:printing/printing.dart';
+import 'package:printer_agent/core/printer/bitmap/receipt_business_logic.dart';
 import 'package:printer_agent/core/profile/restaurant_profile_model.dart';
 import 'package:printer_agent/core/profile/restaurant_profile_service.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -110,7 +111,14 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
                 PrintConfig.upiQrEnabled &&
                 PrintConfig.upiId.trim().isNotEmpty)
             ? await _generateQrImage(
-                PrintConfig.upiQrDataForBill(job.order.billData))
+                PrintConfig.upiQrDataForBill(
+                  job.order.billData,
+                  amountOverride: ReceiptBusinessLogic.printedBillTotal(
+                    job.order.billData,
+                    restaurantProfile,
+                  ),
+                ),
+              )
             : null;
         final feedbackQrImage = (!isAggregator && PrintConfig.feedbackQrEnabled)
             ? await _generateQrImage(
@@ -619,7 +627,6 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
     final vatTax = d('vat_tax');
     final packingCharge = d('packing_charge');
     final grantAmount = d('grant_amount');
-    final paymentAmount = d('payment_amount');
     final roomAdvance = d('room_advance_pay');
     final roomPending = d('room_remaining_pay');
     final isAggregator = bill['is_aggregator'] == true;
@@ -647,7 +654,9 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
       return 'Paid by $method';
     }
 
-    final totalAmount = isRoomOrder ? paymentAmount : grantAmount;
+    final totalAmount =
+        ReceiptBusinessLogic.printedBillTotal(bill, profile);
+    final roundOff = ReceiptBusinessLogic.roundOffAmount(bill, profile);
     // final totalLabel = isRoomOrder ? 'TOTAL' : 'TOTAL ${payLabel()}';
     final totalLabel = isRoomOrder ? 'TOTAL' : 'TOTAL';
 
@@ -786,6 +795,11 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
         ],
         if (vatTax > 0)
           ..._billAmountLineWidgets('VAT', vatTax.toStringAsFixed(2)),
+        if (roundOff.abs() >= 0.005)
+          ..._billAmountLineWidgets(
+            'Round Off',
+            roundOff.toStringAsFixed(2),
+          ),
 
         // ── Total ──
         _simpleDividerOrDotted ? _divider(dashed: true) : buildDottedLine(180),

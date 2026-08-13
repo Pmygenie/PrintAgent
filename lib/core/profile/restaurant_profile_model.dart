@@ -13,6 +13,7 @@ class RestaurantProfileModel {
   final String footerText;
   final String deliveryContactNo;
   final String kotLanguage;
+  final String totalRound;
 
   const RestaurantProfileModel({
     required this.restaurantName,
@@ -29,6 +30,7 @@ class RestaurantProfileModel {
     required this.footerText,
     required this.deliveryContactNo,
     this.kotLanguage = 'English',
+    this.totalRound = 'No',
   });
 
   factory RestaurantProfileModel.empty() {
@@ -78,6 +80,7 @@ class RestaurantProfileModel {
       footerText: restaurant['footer_text']?.toString() ?? '',
       deliveryContactNo: restaurant['delivery_contact_no']?.toString() ?? '',
       kotLanguage: settings['kot_language']?.toString() ?? 'English',
+      totalRound: restaurant['total_round']?.toString() ?? 'No',
     );
   }
 
@@ -97,6 +100,7 @@ class RestaurantProfileModel {
       footerText: json['footerText']?.toString() ?? '',
       deliveryContactNo: json['deliveryContactNo']?.toString() ?? '',
       kotLanguage: json['kotLanguage']?.toString() ?? 'English',
+      totalRound: json['totalRound']?.toString() ?? 'No',
     );
   }
 
@@ -116,6 +120,7 @@ class RestaurantProfileModel {
       'footerText': footerText,
       'deliveryContactNo': deliveryContactNo,
       'kotLanguage': kotLanguage,
+      'totalRound': totalRound,
     };
   }
 
