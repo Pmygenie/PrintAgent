@@ -406,6 +406,27 @@ class RestaurantOrder {
         addonTotal += addonPrice * qty;
       }
 
+      // Variations (from food_details.options_to_add)
+      final optionData = (food['options_to_add'] as List?) ?? const [];
+      final List<String> variations = [];
+      double variationTotal = 0.0;
+      for (final o in optionData) {
+        final map = Map<String, dynamic>.from(o as Map);
+        final group = map['group'] is Map
+            ? Map<String, dynamic>.from(map['group'] as Map)
+            : <String, dynamic>{};
+        if (group['is_variant'] != true) continue;
+
+        final title = map['title']?.toString() ?? '';
+        final qty = int.tryParse(map['quantity']?.toString() ?? '1') ?? 1;
+        final price =
+            double.tryParse(map['price']?.toString() ?? '0') ?? 0.0;
+        if (title.isNotEmpty) {
+          variations.add('$title x$qty');
+        }
+        variationTotal += price * qty;
+      }
+
       return OrderItem(
         name: food['title']?.toString() ??
               food['name']?.toString() ??
@@ -420,6 +441,8 @@ class RestaurantOrder {
         foodStatus: detail['food_status'] is int
             ? detail['food_status']
             : int.tryParse(detail['food_status']?.toString() ?? ''),
+        variations: variations,
+        variationTotal: variationTotal,
         addons: addons,
         addonTotal: addonTotal,
         createdAt: detail['created_at'] != null
