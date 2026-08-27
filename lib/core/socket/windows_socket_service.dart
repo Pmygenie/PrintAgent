@@ -103,10 +103,20 @@ class WindowsSocketService {
           _log('kds loaded');
         }
 
+        if (billData['station_gst_details'] == null) {
+          if (json['station_gst_details'] != null) {
+            billData['station_gst_details'] = json['station_gst_details'];
+          } else if (details is Map && details['station_gst_details'] != null) {
+            billData['station_gst_details'] = details['station_gst_details'];
+          }
+        }
+
         return {
           ...Map<String, dynamic>.from(details),
           'bill': billData,
           'kds': kdsData,
+          if (json['station_gst_details'] != null)
+            'station_gst_details': json['station_gst_details'],
         };
       } catch (e) {
         _log('❌ fetchOrderRaw error (attempt $attempt): $e');
@@ -906,14 +916,15 @@ class WindowsSocketService {
           return;
         }
 
-        final empId = configData['employee_id']?.toString();
-        if (empId != null &&
-            empId.trim().isNotEmpty &&
-            empId.trim() != PrintConfig.empId.trim()) {
-          _log(
-              '⏩ printer_agent_config — empId mismatch ($empId vs ${PrintConfig.empId}), skip');
-          return;
-        }
+        // Apply whatever arrives, including a different employee_id.
+        // final empId = configData['employee_id']?.toString();
+        // if (empId != null &&
+        //     empId.trim().isNotEmpty &&
+        //     empId.trim() != PrintConfig.empId.trim()) {
+        //   _log(
+        //       '⏩ printer_agent_config — empId mismatch ($empId vs ${PrintConfig.empId}), skip');
+        //   return;
+        // }
 
         _applyingConfig = true;
         final ok =

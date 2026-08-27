@@ -12,6 +12,7 @@ import 'package:printing/printing.dart';
 import 'package:printer_agent/core/profile/restaurant_profile_model.dart';
 import 'package:printer_agent/core/profile/restaurant_profile_service.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:printer_agent/core/printer/bitmap/receipt_business_logic.dart';
 import '../config/print_config.dart';
 import '../config/app_constants.dart';
 import '../models/order_item.dart';
@@ -495,7 +496,7 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
           _divider(),
           pw.Center(
             child: pw.Text(
-              'Powered by MyGenie',
+              PrintConfig.poweredByFooter,
               style: _text(size: _footerSize, bold: _footerBold),
             ),
           ),
@@ -561,7 +562,7 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
           _divider(),
           pw.Center(
             child: pw.Text(
-              'Powered by MyGenie',
+              PrintConfig.poweredByFooter,
               style: _text(size: _footerSize, bold: _footerBold),
             ),
           ),
@@ -777,6 +778,7 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
         if (tip > 0) ..._billAmountLineWidgets('Tip', tip.toStringAsFixed(2)),
         if (!isAggregator)
           ..._billAmountLineWidgets('Sub Total', subTotal.toStringAsFixed(2)),
+        ..._stationGstDetailWidgets(bill, profile.restaurantFor),
         if (gstTax > 0) ...[
           if (isAggregator)
             ..._billAmountLineWidgets('Total Tax', gstTax.toStringAsFixed(2))
@@ -885,7 +887,7 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
 
         pw.Center(
           child: pw.Text(
-            'Powered by MyGenie',
+            PrintConfig.poweredByFooter,
             style: _text(size: _footerSize, bold: _footerBold),
           ),
         ),
@@ -1529,6 +1531,56 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
   // Mirrors EscPos _alignRightLabelValue: right-justified label+value
   // block with minimal left spacer.
   // ═══════════════════════════════════════════════════════════════════
+
+  static List<pw.Widget> _stationGstDetailWidgets(
+    Map<dynamic, dynamic> bill,
+    String restaurantFor,
+  ) {
+    final rows = ReceiptBusinessLogic.stationGstRows(
+      bill,
+      restaurantFor: restaurantFor,
+    );
+    if (rows.isEmpty) return const [];
+
+    final headerStyle = _text(
+      size: _billAmountLineTextSize,
+      bold: true,
+    );
+    final rowStyle = _text(
+      size: _billAmountLineTextSize,
+      bold: _billAmountLineTextBold,
+    );
+
+    return [
+      _simpleDividerOrDotted ? _divider() : buildDottedLine(180),
+      pw.Center(
+        child: pw.Text('GST Detail', style: headerStyle),
+      ),
+      for (final row in rows)
+        pw.Row(
+          children: [
+            pw.Expanded(
+              child: pw.Text(row['name'] ?? '', style: rowStyle),
+            ),
+            pw.Expanded(
+              child: pw.Text(
+                row['taxId'] ?? '',
+                textAlign: pw.TextAlign.center,
+                style: rowStyle,
+              ),
+            ),
+            pw.Expanded(
+              child: pw.Text(
+                row['gst'] ?? '',
+                textAlign: pw.TextAlign.right,
+                style: rowStyle,
+              ),
+            ),
+          ],
+        ),
+      _simpleDividerOrDotted ? _divider() : buildDottedLine(180),
+    ];
+  }
 
   static List<pw.Widget> _billAmountLineWidgets(String label, String value) {
     final textSize = _billAmountLineTextSize;

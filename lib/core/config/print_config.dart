@@ -214,8 +214,7 @@ class PrintConfig {
   static int usbProductId = 14384;
   static String empId = "002";
   // apiUrl / serverUrl removed — see AppConstants, the sole source of truth.
-  static String authToken =
-      '5uC0OjRzJ4JSquaVQt4fV3AbosgwOSBiiz7puApXesmjL55BLRCjfuKS7DiPQ4u7M7CN7kVKEt54FcPaUVNztniRTcuuBOdLWKfkFtBRK0rqB5aKwdqdcnao';
+  static String authToken = '';
 
   // ✅ UPDATED — Network and Bluetooth fields
   static PrinterConnectionType connectionType = PrinterConnectionType.usb;
@@ -231,6 +230,15 @@ class PrintConfig {
   static bool upiQrEnabled = false;
   static bool upiDynamicEnabled = false;
   static String upiId = '';
+
+  /// Bill/KOT bottom line from printer-agent-config `bill_footer.footer_text`.
+  static String billFooterText = 'Powered by MyGenie';
+
+  /// Resolved footer line — API text, or default if blank.
+  static String get poweredByFooter {
+    final t = billFooterText.trim();
+    return t.isNotEmpty ? t : 'Powered by MyGenie';
+  }
 
   // ── Helpers ───────────────────────────────────────────
   static bool get hasNoStations => stations.isEmpty;
@@ -251,11 +259,9 @@ class PrintConfig {
     final grantAmount = d('grant_amount');
     final paymentAmount = d('payment_amount');
     final associatedOrders = bill['associated_orders'] as List<dynamic>?;
-    final isRoomOrder =
-        associatedOrders != null && associatedOrders.isNotEmpty;
+    final isRoomOrder = associatedOrders != null && associatedOrders.isNotEmpty;
     // final totalAmount = isRoomOrder ? paymentAmount : grantAmount;
-    final totalAmount =  grantAmount;
-
+    final totalAmount = grantAmount;
 
     final amount = upiDynamicEnabled ? totalAmount.toStringAsFixed(2) : '0';
     return 'upi://pay?pa=$upiId&pn=&am=$amount&tn=';
@@ -319,6 +325,7 @@ class PrintConfig {
     upiQrEnabled = p.getBool('upiQrEnabled') ?? false;
     upiDynamicEnabled = p.getBool('upiDynamicEnabled') ?? false;
     upiId = p.getString('upiId') ?? '';
+    billFooterText = p.getString('billFooterText') ?? 'Powered by MyGenie';
   }
 
   // ── Save ──────────────────────────────────────────────
@@ -358,6 +365,7 @@ class PrintConfig {
     await p.setBool('upiQrEnabled', upiQrEnabled);
     await p.setBool('upiDynamicEnabled', upiDynamicEnabled);
     await p.setString('upiId', upiId);
+    await p.setString('billFooterText', billFooterText);
   }
 
   static bool get isConfigured =>

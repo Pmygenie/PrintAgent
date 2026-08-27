@@ -40,6 +40,10 @@ class PrinterAgentConfigMapper {
     final restaurantInfo = _map(settingsConfig['restaurant_information']);
     PrintConfig.restaurantName = _str(restaurantInfo['restaurant_name'], PrintConfig.restaurantName);
 
+    final billFooter = _map(settingsConfig['bill_footer']);
+    PrintConfig.billFooterText =
+        _str(billFooter['footer_text'], PrintConfig.billFooterText);
+
     final paperSettings = _map(settingsConfig['paper_settings']);
     PrintConfig.is80mm = _paperIs80mm(paperSettings['paper_size'], PrintConfig.is80mm);
 

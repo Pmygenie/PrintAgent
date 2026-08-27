@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:printer_agent/core/config/app_constants.dart';
+import 'package:printer_agent/core/config/print_config.dart';
 import 'package:printer_agent/core/models/order_item.dart';
 import 'package:printer_agent/core/models/print_style_config.dart';
 import 'package:printer_agent/core/models/restaurant_order.dart';
@@ -227,6 +228,27 @@ class BillRenderer {
       canvas.drawLabelValue(
           'Sub Total', subTotal.toStringAsFixed(2), amountStyle);
     }
+    final stationGstRows = ReceiptBusinessLogic.stationGstRows(
+      bill,
+      restaurantFor: profile.restaurantFor,
+    );
+    if (stationGstRows.isNotEmpty) {
+      canvas.drawRule(solid);
+      canvas.drawText(
+        'GST Detail',
+        canvas.styleFor(style.billAmountLine).copyWith(fontWeight: FontWeight.bold),
+        align: TextAlign.center,
+      );
+      for (final row in stationGstRows) {
+        canvas.drawThreeColRow(
+          row['name'] ?? '',
+          row['taxId'] ?? '',
+          row['gst'] ?? '',
+          amountStyle,
+        );
+      }
+      canvas.drawRule(solid);
+    }
     if (gstTax > 0) {
       if (isAggregator) {
         canvas.drawLabelValue('GST', gstTax.toStringAsFixed(2), amountStyle);
@@ -323,7 +345,7 @@ class BillRenderer {
       );
     }
     canvas.drawText(
-      'Powered by MyGenie',
+      PrintConfig.poweredByFooter,
       canvas.styleFor(style.footer).copyWith(fontWeight: FontWeight.bold),
       align: TextAlign.center,
     );

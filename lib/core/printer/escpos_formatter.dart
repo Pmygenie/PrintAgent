@@ -32,7 +32,7 @@
 //     List<int> b = [];
 
 //     b += g.hr(ch: '=');
-//     b += g.text(
+//     b += await _escPrintLine(g, 
 //       o.restaurantName.toUpperCase(),
 //       styles: const PosStyles(bold: true, align: PosAlign.center),
 //     );
@@ -44,7 +44,7 @@
 //       PosColumn(text: o.tableDisplay, width: 6,
 //           styles: const PosStyles(align: PosAlign.right)),
 //     ]);
-//     b += g.text(_formatDate(o.receivedAt));
+//     b += await _escPrintLine(g, _formatDate(o.receivedAt));
 //     b += g.hr(ch: '-');
 
 //     b += g.row([
@@ -70,7 +70,7 @@
 //       ]);
 
 //       if (item.note.isNotEmpty) {
-//         b += g.text('  > ${item.note}',
+//         b += await _escPrintLine(g, '  > ${item.note}',
 //             styles: const PosStyles(underline: true));
 //       }
 //     }
@@ -86,7 +86,7 @@
 //     ]);
 //     b += g.hr(ch: '=');
 
-//     b += g.text('Thank you! Visit Again',
+//     b += await _escPrintLine(g, 'Thank you! Visit Again',
 //         styles: const PosStyles(align: PosAlign.center));
 
 //     return b;
@@ -97,7 +97,7 @@
 //     List<int> b = [];
 
 //     b += g.hr(ch: '=');
-//     b += g.text(
+//     b += await _escPrintLine(g, 
 //       'KOT',
 //       styles: const PosStyles(
 //         bold: true, align: PosAlign.center,
@@ -107,7 +107,7 @@
 
 //     if (stationLabel != null && stationLabel.isNotEmpty) {
 //       b += g.hr(ch: '-');
-//       b += g.text(
+//       b += await _escPrintLine(g, 
 //         '[ $stationLabel ]',
 //         styles: const PosStyles(
 //           bold:   true,
@@ -148,7 +148,7 @@
 //         ),
 //       ]);
 //       if (item.note.isNotEmpty) {
-//         b += g.text('  > ${item.note}',
+//         b += await _escPrintLine(g, '  > ${item.note}',
 //             styles: const PosStyles(underline: true));
 //       }
 //     }
@@ -176,18 +176,33 @@
 // }
 
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
+import 'package:flutter/material.dart' show Color, FontWeight, TextAlign, TextStyle;
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
+import 'package:printer_agent/core/printer/receipt_text_renderer.dart';
 import 'package:qr/qr.dart';
 import 'package:printer_agent/core/profile/restaurant_profile_model.dart';
 import 'package:printer_agent/core/profile/restaurant_profile_service.dart';
 import 'package:printer_agent/core/services/print_style_service.dart';
+import 'package:printer_agent/core/printer/bitmap/receipt_business_logic.dart';
 import '../models/print_job.dart';
 import '../models/order_item.dart';
 import '../models/print_style_config.dart';
 import '../models/restaurant_order.dart';
 import '../config/print_config.dart';
 import '../config/app_constants.dart';
+
+class _EscCol {
+  final String text;
+  final int chars;
+  final TextAlign align;
+
+  const _EscCol(
+    this.text,
+    this.chars, {
+    this.align = TextAlign.left,
+  });
+}
 
 class EscPosFormatter {
   static late PrintStyleConfig _style;
@@ -212,9 +227,9 @@ class EscPosFormatter {
     if (topLines > 0) bytes += generator.emptyLines(topLines);
 
     if (job.type == PrintType.kot) {
-      bytes += _buildKot(generator, job.order, job.stationLabel);
+      bytes += await _buildKot(generator, job.order, job.stationLabel);
     } else if (job.type == PrintType.cancelKot) {
-      bytes += _buildCancelKot(generator, job.order, job.stationLabel);
+      bytes += await _buildCancelKot(generator, job.order, job.stationLabel);
     } else {
       final restaurantProfile = await RestaurantProfileService.getProfile();
       img.Image? logoImage = await _fetchEscLogo(restaurantProfile);
@@ -237,8 +252,8 @@ class EscPosFormatter {
               _style.escFeedbackQrSizeMm)
           : null;
 
-      bytes += _buildBill(generator, job.order, restaurantProfile, logoImage,
-          upiQrImage, feedbackQrImage);
+      bytes += await _buildBill(generator, job.order, restaurantProfile,
+          logoImage, upiQrImage, feedbackQrImage);
     }
 
     // Bottom margin
@@ -355,6 +370,170 @@ class EscPosFormatter {
     return firstSize == secondSize && first.escBold == second.escBold;
   }
 
+  static final _gujaratiRe = RegExp(r'[\u0A80-\u0AFF]');
+
+  /// English → ESC/POS text. Gujarati → raster image so LAN printers don't
+  /// throw Latin-1 "Contains invalid characters".
+  static Future<List<int>> _escPrintLine(
+    Generator g,
+    String text, {
+    required PosStyles styles,
+  }) async {
+    if (text.isEmpty || !_gujaratiRe.hasMatch(text)) {
+      return g.text(text, styles: styles);
+    }
+
+    try {
+      final raster = await _rasterizeGujaratiLine(text, styles);
+      if (raster == null) {
+        return g.text(_latin1Safe(text), styles: styles);
+      }
+      return g.image(raster, align: styles.align);
+    } catch (_) {
+      return g.text(_latin1Safe(text), styles: styles);
+    }
+  }
+
+  static String _latin1Safe(String text) {
+    return String.fromCharCodes(
+      text.codeUnits.map((c) => c <= 255 ? c : 0x3F),
+    );
+  }
+
+  /// Flutter fontSize before [ReceiptTextRenderer]'s ×3 supersample.
+  /// ESC/POS prints 1 PNG pixel = 1 dot, so (fontSize × 3) must match
+  /// ESC Font A height (~24 dots × size multiplier).
+  static double _escImageFontSize(PosStyles styles) {
+    const base = 8.0; // 8 × 3 = 24 dots ≈ native size1
+    if (styles.height == PosTextSize.size8) return base * 8;
+    if (styles.height == PosTextSize.size7) return base * 7;
+    if (styles.height == PosTextSize.size6) return base * 6;
+    if (styles.height == PosTextSize.size5) return base * 5;
+    if (styles.height == PosTextSize.size4) return base * 4;
+    if (styles.height == PosTextSize.size3) return base * 3;
+    if (styles.height == PosTextSize.size2) return base * 2;
+    return base;
+  }
+
+  static Future<img.Image?> _rasterizeGujaratiLine(
+    String text,
+    PosStyles styles,
+  ) async {
+    final paperDots = PrintConfig.is80mm ? 576 : 384;
+    // ReceiptTextRenderer layouts at maxWidth * 3 px; 128 → 384px on 58mm.
+    final maxWidth = paperDots / 3.0;
+    final align = switch (styles.align) {
+      PosAlign.center => TextAlign.center,
+      PosAlign.right => TextAlign.right,
+      _ => TextAlign.left,
+    };
+
+    final png = await ReceiptTextRenderer.renderTextToImage(
+      text,
+      TextStyle(
+        fontSize: _escImageFontSize(styles),
+        fontWeight: styles.bold ? FontWeight.bold : FontWeight.normal,
+        color: const Color(0xFF000000),
+      ),
+      maxWidth: maxWidth,
+      textAlign: align,
+    );
+
+    var decoded = img.decodeImage(png);
+    if (decoded == null) return null;
+    if (decoded.width > paperDots) {
+      decoded = img.copyResize(decoded, width: paperDots);
+    }
+    final evenWidth = decoded.width - (decoded.width % 8);
+    if (evenWidth > 0 && evenWidth != decoded.width) {
+      decoded = img.copyResize(decoded, width: evenWidth);
+    }
+    return decoded;
+  }
+
+  /// Fixed char-column bands → full-width raster so QTY/AMT match ESC headers.
+  static Future<List<int>> _escPrintColumns(
+    Generator g,
+    List<_EscCol> columns, {
+    required PosStyles styles,
+  }) async {
+    try {
+      final raster = await _rasterizeColumnRow(columns, styles);
+      if (raster == null) {
+        final fallback = columns.map((c) => c.text).join(' ');
+        return _escPrintLine(g, fallback, styles: styles);
+      }
+      return g.image(raster, align: PosAlign.left);
+    } catch (_) {
+      final fallback = columns.map((c) => c.text).join(' ');
+      return _escPrintLine(g, fallback, styles: styles);
+    }
+  }
+
+  static Future<img.Image?> _rasterizeColumnRow(
+    List<_EscCol> columns,
+    PosStyles styles,
+  ) async {
+    final paperDots = PrintConfig.is80mm ? 576 : 384;
+    final dotsPerChar = paperDots / _width;
+    final style = TextStyle(
+      fontSize: _escImageFontSize(styles),
+      fontWeight: styles.bold ? FontWeight.bold : FontWeight.normal,
+      color: const Color(0xFF000000),
+    );
+
+    final cells = <({img.Image image, int x0, int bandW, TextAlign align})>[];
+    var maxH = 1;
+    var xCursor = 0.0;
+
+    for (final col in columns) {
+      final x0 = xCursor.round().clamp(0, paperDots);
+      final idealW = (col.chars * dotsPerChar).round();
+      final bandW = idealW.clamp(1, (paperDots - x0).clamp(1, paperDots));
+      xCursor += col.chars * dotsPerChar;
+
+      final text = col.text.trim();
+      if (text.isEmpty) continue;
+
+      // Latin QTY (e.g. "100gm") must not wrap inside a narrow band.
+      final layoutMax = _gujaratiRe.hasMatch(text)
+          ? bandW / 3.0
+          : double.infinity;
+
+      final png = await ReceiptTextRenderer.renderTextToImage(
+        text,
+        style,
+        maxWidth: layoutMax,
+        textAlign: col.align,
+      );
+      var cell = img.decodeImage(png);
+      if (cell == null) continue;
+      if (cell.width > bandW) {
+        cell = img.copyResize(cell, width: bandW);
+      }
+      if (cell.height > maxH) maxH = cell.height;
+      cells.add((image: cell, x0: x0, bandW: bandW, align: col.align));
+    }
+
+    if (cells.isEmpty) return null;
+
+    final canvas = img.Image(width: paperDots, height: maxH);
+    img.fill(canvas, color: img.ColorRgb8(255, 255, 255));
+
+    for (final cell in cells) {
+      final rawX = switch (cell.align) {
+        TextAlign.center => cell.x0 + ((cell.bandW - cell.image.width) ~/ 2),
+        TextAlign.right => cell.x0 + cell.bandW - cell.image.width,
+        _ => cell.x0,
+      };
+      final maxX = (paperDots - cell.image.width).clamp(0, paperDots);
+      final dstX = rawX.clamp(0, maxX);
+      img.compositeImage(canvas, cell.image, dstX: dstX, dstY: 0);
+    }
+
+    return canvas;
+  }
+
   // ─────────────────────────────────────────────────────
   // ALIGNMENT HELPER
   // Pads left + right to fill full _width
@@ -404,14 +583,14 @@ class EscPosFormatter {
     return null;
   }
 
-  static List<int> _buildBill(
+  static Future<List<int>> _buildBill(
     Generator g,
     RestaurantOrder o,
     RestaurantProfileModel profile,
     img.Image? logoImage,
     img.Image? upiQrImage,
     img.Image? feedbackQrImage,
-  ) {
+  ) async {
     List<int> b = [];
 
     final restaurantName = profile.restaurantName.isNotEmpty
@@ -451,7 +630,7 @@ class EscPosFormatter {
       return orderType.replaceAll('_', ' ').toUpperCase();
     }
 
-    // b += g.text(
+    // b += await _escPrintLine(g, 
     //   lineEquals,
     //   styles: const PosStyles(align: PosAlign.center, bold: true),
     // );
@@ -462,47 +641,47 @@ class EscPosFormatter {
       b += g.feed(1);
     }
 
-    b += g.text(
+    b += await _escPrintLine(g, 
       restaurantName.toUpperCase(),
       styles: _escStyle(_style.restaurantName, align: PosAlign.center),
     );
 
     if (restaurantAddress.isNotEmpty) {
-      b += g.text(
+      b += await _escPrintLine(g, 
         restaurantAddress,
         styles: _escStyle(_style.restaurantAddress, align: PosAlign.center),
       );
     }
 
     // if (restaurantEmail.isNotEmpty) {
-    //   b += g.text(
+    //   b += await _escPrintLine(g, 
     //     restaurantEmail,
     //     styles: const PosStyles(align: PosAlign.center),
     //   );
     // }
 
     if (restaurantPhone.isNotEmpty) {
-      b += g.text(
+      b += await _escPrintLine(g, 
         'Ph: $restaurantPhone',
         styles: _escStyle(_style.restaurantPhone, align: PosAlign.center),
       );
     }
 
     if (restaurantGstNo.isNotEmpty) {
-      b += g.text(
+      b += await _escPrintLine(g, 
         'GST No: $restaurantGstNo',
         styles: _escStyle(_style.restaurantGst, align: PosAlign.center),
       );
     }
 
     if (restaurantFssai.isNotEmpty) {
-      b += g.text(
+      b += await _escPrintLine(g, 
         'Fssai No: $restaurantFssai',
         styles: _escStyle(_style.restaurantFssai, align: PosAlign.center),
       );
     }
 
-    b += g.text(
+    b += await _escPrintLine(g, 
       lineEquals,
       styles: const PosStyles(align: PosAlign.center, bold: true),
     );
@@ -514,7 +693,7 @@ class EscPosFormatter {
       waiterName,
       _formatDate(o.receivedAt),
     )) {
-      b += g.text(
+      b += await _escPrintLine(g, 
         row,
         styles: _escStyle(_style.billInfoRow1, align: PosAlign.center),
       );
@@ -529,7 +708,7 @@ class EscPosFormatter {
         centerLabel(),
         custPhone,
       )) {
-        b += g.text(
+        b += await _escPrintLine(g, 
           row,
           styles: _escStyle(_style.billInfoRow2, align: PosAlign.center),
         );
@@ -542,7 +721,7 @@ class EscPosFormatter {
         '',
         custGstNumber,
       )) {
-        b += g.text(
+        b += await _escPrintLine(g, 
           row,
           styles: _escStyle(_style.billInfoRow3, align: PosAlign.center),
         );
@@ -555,14 +734,14 @@ class EscPosFormatter {
         'T-${o.dailyToken}',
         '',
       )) {
-        b += g.text(
+        b += await _escPrintLine(g, 
           row,
           styles: _escStyle(_style.billInfoRow4, align: PosAlign.center),
         );
       }
     }
 
-    b += g.text(lineDashes,
+    b += await _escPrintLine(g, lineDashes,
         styles: const PosStyles(align: PosAlign.center, bold: true));
     // ── Table Header ──  full width columns
     final bool show80mmDate =
@@ -572,14 +751,14 @@ class EscPosFormatter {
     final int dateWidth = show80mmDate ? 6 : 0; // "9-Jul" = 5 chars + 1 pad
     final int itemWidth = _width - qtyWidth - amtWidth - dateWidth;
 
-    b += g.text(
+    b += await _escPrintLine(g, 
       _padR('ITEM', itemWidth) +
           _padC('QTY', qtyWidth) +
           _padL('AMT', amtWidth) +
           (show80mmDate ? _padL('DATE', dateWidth) : ''),
       styles: _escStyle(_style.billTableHeader, align: PosAlign.center),
     );
-    b += g.text(lineDashes,
+    b += await _escPrintLine(g, lineDashes,
         styles: const PosStyles(align: PosAlign.center, bold: true));
 
     // ── Items loop ── complementary + variations + add-ons
@@ -603,12 +782,24 @@ class EscPosFormatter {
 
       final displayName = isComp ? '${item.name} (Comp)' : item.name;
 
-      final itemNameLines = _wrapText(displayName, itemWidth);
+      final itemNameLines = _wrapItemName(displayName, itemWidth);
 
       final dateStr = show80mmDate ? _escItemDate(item.createdAt) : '';
 
-      if (_sameEscStyle(_style.billTableContent, _style.billTableQty)) {
-        b += g.text(
+      if (_gujaratiRe.hasMatch(itemNameLines.first)) {
+        b += await _escPrintColumns(
+          g,
+          [
+            _EscCol(itemNameLines.first, itemWidth),
+            _EscCol(qtyDisplay, qtyWidth, align: TextAlign.center),
+            _EscCol(_formatMoney(amt), amtWidth, align: TextAlign.right),
+            if (show80mmDate)
+              _EscCol(dateStr, dateWidth, align: TextAlign.right),
+          ],
+          styles: _escStyle(_style.billTableContent),
+        );
+      } else if (_sameEscStyle(_style.billTableContent, _style.billTableQty)) {
+        b += await _escPrintLine(g, 
           _padR(itemNameLines.first, itemWidth) +
               _padC(qtyDisplay, qtyWidth) +
               _padL(_formatMoney(amt), amtWidth) +
@@ -642,7 +833,7 @@ class EscPosFormatter {
       }
 
       for (int i = 1; i < itemNameLines.length; i++) {
-        b += g.text(
+        b += await _escPrintLine(g, 
           _padR(itemNameLines[i], itemWidth),
           styles: _escStyle(_style.billTableContent),
         );
@@ -657,7 +848,7 @@ class EscPosFormatter {
             '  ',
           );
           for (int i = 0; i < wrapped.length; i++) {
-            b += g.text(
+            b += await _escPrintLine(g, 
               i == 0 ? ' ${wrapped[i]}' : '   ${wrapped[i]}',
               styles: _escStyle(_style.billTableMeta),
             );
@@ -674,7 +865,7 @@ class EscPosFormatter {
             '  ',
           );
           for (int i = 0; i < wrapped.length; i++) {
-            b += g.text(
+            b += await _escPrintLine(g, 
               i == 0 ? ' ${wrapped[i]}' : '   ${wrapped[i]}',
               styles: _escStyle(_style.billTableMeta),
             );
@@ -687,9 +878,9 @@ class EscPosFormatter {
     // ════════════════════════════════════════════════════
 
     if (orderNote != '') {
-      b += g.text(lineDashes,
+      b += await _escPrintLine(g, lineDashes,
           styles: const PosStyles(align: PosAlign.center, bold: true));
-      b += g.text('Notes : $orderNote',
+      b += await _escPrintLine(g, 'Notes : $orderNote',
           styles: _escStyle(_style.orderNote, align: PosAlign.center));
     }
 
@@ -739,15 +930,15 @@ class EscPosFormatter {
       return '(Paid by $method)';
     }
 
-    b += g.text(lineEquals,
+    b += await _escPrintLine(g, lineEquals,
         styles: const PosStyles(align: PosAlign.center, bold: true));
 
     // // Item Total — always
-    // b += g.text(_alignLR('Item Total', itemTotal.toStringAsFixed(2)));
+    // b += await _escPrintLine(g, _alignLR('Item Total', itemTotal.toStringAsFixed(2)));
 
     // // Service Charge — if > 0
     // if (serviceCharge > 0) {
-    //   b += g.text(_alignLR('Service Charge', serviceCharge.toStringAsFixed(2)));
+    //   b += await _escPrintLine(g, _alignLR('Service Charge', serviceCharge.toStringAsFixed(2)));
     // }
 
     // // Delivery Charge — if > 0
@@ -758,30 +949,30 @@ class EscPosFormatter {
 
     // // Tip — if > 0
     // if (tip > 0) {
-    //   b += g.text(_alignLR('Tip', tip.toStringAsFixed(2)));
+    //   b += await _escPrintLine(g, _alignLR('Tip', tip.toStringAsFixed(2)));
     // }
 
     // // Sub Total — always
-    // b += g.text(_alignLR('Sub Total', subTotal.toStringAsFixed(2)));
+    // b += await _escPrintLine(g, _alignLR('Sub Total', subTotal.toStringAsFixed(2)));
 
     // // CGST + SGST — if gst_tax > 0
     // if (gstTax > 0) {
     //   final half = gstTax / 2;
-    //   b += g.text(_alignLR('CGST', half.toStringAsFixed(2)));
-    //   b += g.text(_alignLR('SGST', half.toStringAsFixed(2)));
+    //   b += await _escPrintLine(g, _alignLR('CGST', half.toStringAsFixed(2)));
+    //   b += await _escPrintLine(g, _alignLR('SGST', half.toStringAsFixed(2)));
     // }
 
     // // VAT — if > 0
     // if (vatTax > 0) {
-    //   b += g.text(_alignLR('VAT', vatTax.toStringAsFixed(2)));
+    //   b += await _escPrintLine(g, _alignLR('VAT', vatTax.toStringAsFixed(2)));
     // }
-    b += g.text(
+    b += await _escPrintLine(g, 
       _alignRightLabelValue('Item Total', itemTotal.toStringAsFixed(2)),
       styles: _escStyle(_style.billAmountLine),
     );
 
     if (serviceCharge > 0) {
-      b += g.text(
+      b += await _escPrintLine(g, 
         _alignRightLabelValue(
             'Service Charge', serviceCharge.toStringAsFixed(2)),
         styles: _escStyle(_style.billAmountLine),
@@ -789,7 +980,7 @@ class EscPosFormatter {
     }
 
     if (deliveryCharge > 0) {
-      b += g.text(
+      b += await _escPrintLine(g, 
         _alignRightLabelValue(
             'Delivery Charge', deliveryCharge.toStringAsFixed(2)),
         styles: _escStyle(_style.billAmountLine),
@@ -797,14 +988,14 @@ class EscPosFormatter {
     }
 
     if (discountAmount > 0) {
-      b += g.text(
+      b += await _escPrintLine(g, 
         _alignRightLabelValue('Discount', discountAmount.toString()),
         styles: _escStyle(_style.billAmountLine),
       );
     }
 
     if (packingCharge > 0) {
-      b += g.text(
+      b += await _escPrintLine(g, 
         _alignRightLabelValue(
             'Packing Charge', packingCharge.toStringAsFixed(2)),
         styles: _escStyle(_style.billAmountLine),
@@ -812,53 +1003,84 @@ class EscPosFormatter {
     }
 
     if (couponCode != '') {
-      b += g.text(
+      b += await _escPrintLine(g, 
         _alignRightLabelValue('Coupon Code', couponCode.toString()),
         styles: _escStyle(_style.billAmountLine),
       );
     }
 
     if (loyaltyAmount > 0) {
-      b += g.text(
+      b += await _escPrintLine(g, 
         _alignRightLabelValue('Loyalty', loyaltyAmount.toString()),
         styles: _escStyle(_style.billAmountLine),
       );
     }
 
     if (walletAmount > 0) {
-      b += g.text(
+      b += await _escPrintLine(g, 
         _alignRightLabelValue('Wallet', walletAmount.toString()),
         styles: _escStyle(_style.billAmountLine),
       );
     }
 
     if (tip > 0) {
-      b += g.text(
+      b += await _escPrintLine(g, 
         _alignRightLabelValue('Tip', tip.toStringAsFixed(2)),
         styles: _escStyle(_style.billAmountLine),
       );
     }
 
     if (!isAggregator) {
-      b += g.text(
+      b += await _escPrintLine(g, 
         _alignRightLabelValue('Sub Total', subTotal.toStringAsFixed(2)),
         styles: _escStyle(_style.billAmountLine),
       );
     }
 
+    final stationGstRows = ReceiptBusinessLogic.stationGstRows(
+      bill,
+      restaurantFor: profile.restaurantFor,
+    );
+    if (stationGstRows.isNotEmpty) {
+      b += await _escPrintLine(g, lineDashes,
+          styles: const PosStyles(align: PosAlign.center, bold: true));
+      b += await _escPrintLine(g, 
+        'GST Detail',
+        styles: _escStyle(
+          _style.billAmountLine,
+          align: PosAlign.center,
+          boldOverride: true,
+        ),
+      );
+      for (final row in stationGstRows) {
+        for (final line in _buildWrapped3ColRow(
+          row['name'] ?? '',
+          row['taxId'] ?? '',
+          row['gst'] ?? '',
+        )) {
+          b += await _escPrintLine(g, 
+            line,
+            styles: _escStyle(_style.billAmountLine),
+          );
+        }
+      }
+      b += await _escPrintLine(g, lineDashes,
+          styles: const PosStyles(align: PosAlign.center, bold: true));
+    }
+
     if (gstTax > 0) {
       if (isAggregator) {
-        b += g.text(
+        b += await _escPrintLine(g, 
           _alignRightLabelValue('GST', gstTax.toStringAsFixed(2)),
           styles: _escStyle(_style.billAmountLine),
         );
       } else {
         final half = gstTax / 2;
-        b += g.text(
+        b += await _escPrintLine(g, 
           _alignRightLabelValue('CGST', half.toStringAsFixed(2)),
           styles: _escStyle(_style.billAmountLine),
         );
-        b += g.text(
+        b += await _escPrintLine(g, 
           _alignRightLabelValue('SGST', half.toStringAsFixed(2)),
           styles: _escStyle(_style.billAmountLine),
         );
@@ -866,13 +1088,13 @@ class EscPosFormatter {
     }
 
     if (vatTax > 0) {
-      b += g.text(
+      b += await _escPrintLine(g, 
         _alignRightLabelValue('VAT', vatTax.toStringAsFixed(2)),
         styles: _escStyle(_style.billAmountLine),
       );
     }
 
-    b += g.text(lineDashes,
+    b += await _escPrintLine(g, lineDashes,
         styles: const PosStyles(align: PosAlign.center, bold: true));
 
     // Total — room = payment_amount, normal = grant_amount
@@ -881,16 +1103,16 @@ class EscPosFormatter {
     if (paymentLabel.isEmpty ||
         _sameEscStyle(_style.billTotal, _style.billPaidBy)) {
       final totalLabel = paymentLabel.isEmpty ? 'TOTAL' : 'TOTAL $paymentLabel';
-      b += g.text(
+      b += await _escPrintLine(g, 
         _alignLR(totalLabel, _formatMoney(totalAmount ?? 0)),
         styles: _escStyle(_style.billTotal, align: PosAlign.center),
       );
     } else {
-      b += g.text(
+      b += await _escPrintLine(g, 
         _alignLR('TOTAL', _formatMoney(totalAmount ?? 0)),
         styles: _escStyle(_style.billTotal, align: PosAlign.center),
       );
-      b += g.text(
+      b += await _escPrintLine(g, 
         paymentLabel,
         styles: _escStyle(_style.billPaidBy, align: PosAlign.left),
       );
@@ -898,11 +1120,11 @@ class EscPosFormatter {
 
     // ── Delivery Details — only for delivery orders ───────
     if (bill['order_type']?.toString() == 'delivery') {
-      b += g.text(lineDashes,
+      b += await _escPrintLine(g, lineDashes,
           styles: const PosStyles(align: PosAlign.center, bold: true));
-      b += g.text('-- Delivery Details --',
+      b += await _escPrintLine(g, '-- Delivery Details --',
           styles: _escStyle(_style.deliveryHeader, align: PosAlign.center));
-      b += g.text(lineDashes,
+      b += await _escPrintLine(g, lineDashes,
           styles: const PosStyles(align: PosAlign.center, bold: true));
 
       final custName = bill['delivery_cust_name']?.toString() ?? '';
@@ -937,36 +1159,36 @@ class EscPosFormatter {
       }
 
       if (custName.isNotEmpty) {
-        b += g.text(row('Name', custName),
+        b += await _escPrintLine(g, row('Name', custName),
             styles: _escStyle(_style.deliveryContent));
       }
       if (phone.isNotEmpty) {
-        b += g.text(row('Phone', phone),
+        b += await _escPrintLine(g, row('Phone', phone),
             styles: _escStyle(_style.deliveryContent));
       }
       if (addrType.isNotEmpty) {
-        b += g.text(row('Add. Type', addrType),
+        b += await _escPrintLine(g, row('Add. Type', addrType),
             styles: _escStyle(_style.deliveryContent));
       }
       if (addr.isNotEmpty) {
-        b += g.text(row('Address', addr),
+        b += await _escPrintLine(g, row('Address', addr),
             styles: _escStyle(_style.deliveryContent));
       }
       if (pincode.isNotEmpty) {
-        b += g.text(row('Pincode', pincode),
+        b += await _escPrintLine(g, row('Pincode', pincode),
             styles: _escStyle(_style.deliveryContent));
       }
     }
 
     // ── Previous Room Bill — only for room orders ─────────
     if (isRoomOrder) {
-      b += g.text(lineDashes,
+      b += await _escPrintLine(g, lineDashes,
           styles: const PosStyles(align: PosAlign.center, bold: true));
-      b += g.text(
+      b += await _escPrintLine(g, 
         '-- Previous Room Bill --',
         styles: _escStyle(_style.roomHeader, align: PosAlign.center),
       );
-      b += g.text(lineDashes,
+      b += await _escPrintLine(g, lineDashes,
           styles: const PosStyles(align: PosAlign.center, bold: true));
 
       for (final assoc in associatedOrders) {
@@ -974,28 +1196,28 @@ class EscPosFormatter {
         final aId = aMap['restaurant_order_id']?.toString() ?? '';
         final aAmt =
             double.tryParse(aMap['order_amount']?.toString() ?? '0') ?? 0.0;
-        b += g.text(
+        b += await _escPrintLine(g, 
           _alignLR('Order ID #$aId', aAmt.toStringAsFixed(2)),
           styles: _escStyle(_style.roomContent),
         );
       }
 
-      b += g.text(lineDashes,
+      b += await _escPrintLine(g, lineDashes,
           styles: const PosStyles(align: PosAlign.center, bold: true));
 
-      b += g.text(
+      b += await _escPrintLine(g, 
         _alignRightLabelValue('Room Advance', roomAdvance.toStringAsFixed(2)),
         styles: _escStyle(_style.billAmountLine),
       );
-      b += g.text(
+      b += await _escPrintLine(g, 
         _alignRightLabelValue('Room Pending', roomPending.toStringAsFixed(2)),
         styles: _escStyle(_style.billAmountLine),
       );
 
-      b += g.text(lineDashes,
+      b += await _escPrintLine(g, lineDashes,
           styles: const PosStyles(align: PosAlign.center, bold: true));
 
-      b += g.text(
+      b += await _escPrintLine(g, 
         _alignLR('GRAND TOTAL ${payLabel()}',
             'Rs.${grantAmount.toStringAsFixed(0)}'),
         styles: _escStyle(_style.billGrandTotal, align: PosAlign.center),
@@ -1004,31 +1226,31 @@ class EscPosFormatter {
 
     // ── QR Codes — bill only, never on aggregator orders ──
     if (upiQrImage != null) {
-      b += g.text(lineDashes,
+      b += await _escPrintLine(g, lineDashes,
           styles: const PosStyles(align: PosAlign.center, bold: true));
       b += g.image(upiQrImage, align: PosAlign.center);
-      b += g.text('Scan to Pay',
+      b += await _escPrintLine(g, 'Scan to Pay',
           styles: _escStyle(_style.footer, align: PosAlign.center));
     }
 
     if (feedbackQrImage != null) {
-      b += g.text(lineDashes,
+      b += await _escPrintLine(g, lineDashes,
           styles: const PosStyles(align: PosAlign.center, bold: true));
       b += g.image(feedbackQrImage, align: PosAlign.center);
-      b += g.text('Scan for Feedback',
+      b += await _escPrintLine(g, 'Scan for Feedback',
           styles: _escStyle(_style.footer, align: PosAlign.center));
     }
 
     // ── Footer ───────────────────────────────────────────
-    b += g.text(lineEquals,
+    b += await _escPrintLine(g, lineEquals,
         styles: const PosStyles(align: PosAlign.center, bold: true));
     if (profile.footerText.isNotEmpty)
-      b += g.text(
+      b += await _escPrintLine(g, 
         profile.footerText,
         styles: _escStyle(_style.footer, align: PosAlign.center),
       );
-    b += g.text(
-      'Powered by MyGenie',
+    b += await _escPrintLine(g, 
+      PrintConfig.poweredByFooter,
       styles: _escStyle(
         _style.footer,
         align: PosAlign.center,
@@ -1042,11 +1264,11 @@ class EscPosFormatter {
   // ─────────────────────────────────────────────────────
   // KOT
   // ─────────────────────────────────────────────────────
-  static List<int> _buildKot(
+  static Future<List<int>> _buildKot(
     Generator g,
     RestaurantOrder o,
     String? stationLabel,
-  ) {
+  ) async {
     List<int> b = [];
     final lineEq = '=' * _width;
     final lineDash = '-' * _width;
@@ -1054,8 +1276,8 @@ class EscPosFormatter {
     final station = stationLabel?.trim().toUpperCase() ?? '';
     final title = station.isNotEmpty ? 'KOT [ $station ]' : 'KOT';
 
-    final srWidth = _width == 42 ? 4 : 3;
-    final qtyWidth = _width == 42 ? 6 : 5;
+    final srWidth = PrintConfig.is80mm ? 4 : 3;
+    final qtyWidth = PrintConfig.is80mm ? 10 : 10;
     final itemWidth = _width - srWidth - qtyWidth;
 
     final waiterLine = o.waiterName.length > _width
@@ -1066,13 +1288,13 @@ class EscPosFormatter {
     final safeCustomerPhone = (o.userCustPhone ?? '').trim();
 
     for (final line in _wrapTitle(title)) {
-      b += g.text(
+      b += await _escPrintLine(g, 
         line,
         styles: _escStyle(_style.kotTitle, align: PosAlign.center),
       );
     }
 
-    b += g.text(
+    b += await _escPrintLine(g, 
       lineEq,
       styles: const PosStyles(align: PosAlign.center, bold: true),
     );
@@ -1082,7 +1304,7 @@ class EscPosFormatter {
       waiterLine,
       _formatDate(o.receivedAt),
     )) {
-      b += g.text(
+      b += await _escPrintLine(g, 
         row,
         styles: _escStyle(_style.kotOrderInfo1, align: PosAlign.center),
       );
@@ -1105,7 +1327,7 @@ class EscPosFormatter {
         centerText,
         '',
       )) {
-        b += g.text(
+        b += await _escPrintLine(g, 
           row,
           styles: _escStyle(_style.kotOrderInfo2, align: PosAlign.center),
         );
@@ -1118,7 +1340,7 @@ class EscPosFormatter {
         '',
         safeCustomerPhone,
       )) {
-        b += g.text(
+        b += await _escPrintLine(g, 
           row,
           styles: _escStyle(_style.kotOrderInfo3, align: PosAlign.center),
         );
@@ -1131,26 +1353,26 @@ class EscPosFormatter {
         'T-${o.dailyToken}',
         '',
       )) {
-        b += g.text(
+        b += await _escPrintLine(g, 
           row,
           styles: _escStyle(_style.kotOrderInfo4, align: PosAlign.center),
         );
       }
     }
 
-    b += g.text(
+    b += await _escPrintLine(g, 
       lineDash,
       styles: const PosStyles(align: PosAlign.center, bold: true),
     );
 
-    b += g.text(
+    b += await _escPrintLine(g, 
       _padR('SR', srWidth) +
           _padR(' ITEM', itemWidth) +
           _padL('QTY  ', qtyWidth),
       styles: _escStyle(_style.kotTableHeader),
     );
 
-    b += g.text(
+    b += await _escPrintLine(g, 
       lineDash,
       styles: const PosStyles(align: PosAlign.center, bold: true),
     );
@@ -1166,20 +1388,45 @@ class EscPosFormatter {
           ? '${_formatQty(item.quantity)}${item.itemUnit}'
           : _formatQty(item.quantity);
       final qty = '$qtyString  ';
-      final itemNameLines = _wrapText(item.name.trim(), itemWidth);
+      final itemNameLines = _wrapItemName(item.name.trim(), itemWidth);
+      final kotItemStyles = _escStyle(_style.kotTableContent);
 
-      b += g.text(
-        _padR(sr, srWidth) +
-            _padR(itemNameLines.first, itemWidth) +
-            _padL(qty, qtyWidth),
-        styles: _escStyle(_style.kotTableContent),
-      );
+      if (_gujaratiRe.hasMatch(itemNameLines.first)) {
+        b += await _escPrintColumns(
+          g,
+          [
+            _EscCol(sr, srWidth),
+            _EscCol(itemNameLines.first, itemWidth),
+            _EscCol(qtyString, qtyWidth, align: TextAlign.left),
+          ],
+          styles: kotItemStyles,
+        );
+      } else {
+        b += await _escPrintLine(g, 
+          _padR(sr, srWidth) +
+              _padR(itemNameLines.first, itemWidth) +
+              _padL(qty, qtyWidth),
+          styles: kotItemStyles,
+        );
+      }
 
       for (int i = 1; i < itemNameLines.length; i++) {
-        b += g.text(
-          _padR('', srWidth) + _padR(itemNameLines[i], itemWidth),
-          styles: _escStyle(_style.kotTableContent),
-        );
+        if (_gujaratiRe.hasMatch(itemNameLines[i])) {
+          b += await _escPrintColumns(
+            g,
+            [
+              _EscCol('', srWidth),
+              _EscCol(itemNameLines[i], itemWidth),
+              _EscCol('', qtyWidth),
+            ],
+            styles: kotItemStyles,
+          );
+        } else {
+          b += await _escPrintLine(g, 
+            _padR('', srWidth) + _padR(itemNameLines[i], itemWidth),
+            styles: kotItemStyles,
+          );
+        }
       }
 
       if (item.variations.isNotEmpty) {
@@ -1192,7 +1439,7 @@ class EscPosFormatter {
             '     ',
           );
           for (int i = 0; i < wrapped.length; i++) {
-            b += g.text(
+            b += await _escPrintLine(g, 
               i == 0 ? '   ${wrapped[i]}' : wrapped[i],
               styles: _escStyle(_style.kotTableContent, boldOverride: false),
             );
@@ -1210,7 +1457,7 @@ class EscPosFormatter {
             '     ',
           );
           for (int i = 0; i < wrapped.length; i++) {
-            b += g.text(
+            b += await _escPrintLine(g, 
               i == 0 ? '   ${wrapped[i]}' : wrapped[i],
               styles: _escStyle(_style.kotTableContent, boldOverride: false),
             );
@@ -1227,31 +1474,32 @@ class EscPosFormatter {
         );
 
         for (int i = 0; i < wrapped.length; i++) {
-          b += g.text(
+          b += await _escPrintLine(g, 
             i == 0 ? '   ${wrapped[i]}' : wrapped[i],
             styles: _escStyle(_style.kotTableContent, boldOverride: false),
           );
         }
       }
     }
+
     if (o.orderNote.trim().isNotEmpty) {
-      b += g.text(
+      b += await _escPrintLine(g, 
         lineDash,
         styles: const PosStyles(align: PosAlign.center, bold: true),
       );
-      b += g.text(
+      b += await _escPrintLine(g, 
         _padC('Notes: ${_truncate(o.orderNote.trim(), _width - 8)}', _width),
         styles: _escStyle(_style.kotNote),
       );
     }
 
-    b += g.text(
+    b += await _escPrintLine(g, 
       lineEq,
       styles: const PosStyles(align: PosAlign.center, bold: true),
     );
 
-    b += g.text(
-      _padC('Powered by MyGenie', _width),
+    b += await _escPrintLine(g, 
+      _padC(PrintConfig.poweredByFooter, _width),
       styles: _escStyle(
         _style.footer,
         align: PosAlign.left,
@@ -1266,11 +1514,11 @@ class EscPosFormatter {
   // CANCEL KOT
   // Identical to KOT but with CANCEL header
   // ─────────────────────────────────────────────────────
-  static List<int> _buildCancelKot(
+  static Future<List<int>> _buildCancelKot(
     Generator g,
     RestaurantOrder o,
     String? stationLabel,
-  ) {
+  ) async {
     List<int> b = [];
     final lineEq = '=' * _width;
     final lineDash = '-' * _width;
@@ -1278,8 +1526,8 @@ class EscPosFormatter {
     final station = stationLabel?.trim().toUpperCase() ?? '';
     final title = station.isNotEmpty ? 'CANCEL KOT [ $station ]' : 'CANCEL';
 
-    final srWidth = _width == 42 ? 4 : 3;
-    final qtyWidth = _width == 42 ? 6 : 5;
+    final srWidth = PrintConfig.is80mm ? 4 : 3;
+    final qtyWidth = PrintConfig.is80mm ? 10 : 10;
     final itemWidth = _width - srWidth - qtyWidth;
 
     final waiterLine = o.waiterName.length > _width
@@ -1295,20 +1543,20 @@ class EscPosFormatter {
     final cancelTitleWidth =
         (_width / cancelTitleSize.clamp(1, 8)).floor().clamp(1, _width);
     for (final line in _wrapText(title.trim(), cancelTitleWidth)) {
-      b += g.text(
+      b += await _escPrintLine(g, 
         line,
         styles: _escStyle(_style.cancelKotTitle, align: PosAlign.center),
       );
     }
 
     // for (final line in _wrapTitle(title)) {
-    //   b += g.text(
+    //   b += await _escPrintLine(g, 
     //     line,
     //     styles: _escStyle(_style.cancelKotTitle, align: PosAlign.center),
     //   );
     // }
 
-    b += g.text(
+    b += await _escPrintLine(g, 
       lineEq,
       styles: const PosStyles(align: PosAlign.center, bold: true),
     );
@@ -1318,7 +1566,7 @@ class EscPosFormatter {
       waiterLine,
       _formatDate(o.receivedAt),
     )) {
-      b += g.text(
+      b += await _escPrintLine(g, 
         row,
         styles: _escStyle(_style.kotOrderInfo1, align: PosAlign.center),
       );
@@ -1341,7 +1589,7 @@ class EscPosFormatter {
         centerText,
         '',
       )) {
-        b += g.text(
+        b += await _escPrintLine(g, 
           row,
           styles: _escStyle(_style.kotOrderInfo2, align: PosAlign.center),
         );
@@ -1354,7 +1602,7 @@ class EscPosFormatter {
         '',
         safeCustomerPhone,
       )) {
-        b += g.text(
+        b += await _escPrintLine(g, 
           row,
           styles: _escStyle(_style.kotOrderInfo3, align: PosAlign.center),
         );
@@ -1367,26 +1615,26 @@ class EscPosFormatter {
         'T-${o.dailyToken}',
         '',
       )) {
-        b += g.text(
+        b += await _escPrintLine(g, 
           row,
           styles: _escStyle(_style.kotOrderInfo4, align: PosAlign.center),
         );
       }
     }
 
-    b += g.text(
+    b += await _escPrintLine(g, 
       lineDash,
       styles: const PosStyles(align: PosAlign.center, bold: true),
     );
 
-    b += g.text(
+    b += await _escPrintLine(g, 
       _padR('SR', srWidth) +
           _padR(' ITEM', itemWidth) +
           _padL('QTY  ', qtyWidth),
       styles: _escStyle(_style.kotTableHeader),
     );
 
-    b += g.text(
+    b += await _escPrintLine(g, 
       lineDash,
       styles: const PosStyles(align: PosAlign.center, bold: true),
     );
@@ -1399,20 +1647,45 @@ class EscPosFormatter {
           ? '${_formatQty(item.quantity)}${item.itemUnit}'
           : _formatQty(item.quantity);
       final qty = '${qtyString}  ';
-      final itemNameLines = _wrapText(item.name.trim(), itemWidth);
+      final itemNameLines = _wrapItemName(item.name.trim(), itemWidth);
+      final kotItemStyles = _escStyle(_style.kotTableContent);
 
-      b += g.text(
-        _padR(sr, srWidth) +
-            _padR(itemNameLines.first, itemWidth) +
-            _padL(qty, qtyWidth),
-        styles: _escStyle(_style.kotTableContent),
-      );
+      if (_gujaratiRe.hasMatch(itemNameLines.first)) {
+        b += await _escPrintColumns(
+          g,
+          [
+            _EscCol(sr, srWidth),
+            _EscCol(itemNameLines.first, itemWidth),
+            _EscCol(qtyString, qtyWidth, align: TextAlign.left),
+          ],
+          styles: kotItemStyles,
+        );
+      } else {
+        b += await _escPrintLine(g, 
+          _padR(sr, srWidth) +
+              _padR(itemNameLines.first, itemWidth) +
+              _padL(qty, qtyWidth),
+          styles: kotItemStyles,
+        );
+      }
 
       for (int i = 1; i < itemNameLines.length; i++) {
-        b += g.text(
-          _padR('', srWidth) + _padR(itemNameLines[i], itemWidth),
-          styles: _escStyle(_style.kotTableContent),
-        );
+        if (_gujaratiRe.hasMatch(itemNameLines[i])) {
+          b += await _escPrintColumns(
+            g,
+            [
+              _EscCol('', srWidth),
+              _EscCol(itemNameLines[i], itemWidth),
+              _EscCol('', qtyWidth),
+            ],
+            styles: kotItemStyles,
+          );
+        } else {
+          b += await _escPrintLine(g, 
+            _padR('', srWidth) + _padR(itemNameLines[i], itemWidth),
+            styles: kotItemStyles,
+          );
+        }
       }
 
       if (item.variations.isNotEmpty) {
@@ -1425,7 +1698,7 @@ class EscPosFormatter {
             '     ',
           );
           for (int i = 0; i < wrapped.length; i++) {
-            b += g.text(
+            b += await _escPrintLine(g, 
               i == 0 ? '   ${wrapped[i]}' : wrapped[i],
               styles: _escStyle(_style.kotTableContent, boldOverride: false),
             );
@@ -1443,7 +1716,7 @@ class EscPosFormatter {
             '     ',
           );
           for (int i = 0; i < wrapped.length; i++) {
-            b += g.text(
+            b += await _escPrintLine(g, 
               i == 0 ? '   ${wrapped[i]}' : wrapped[i],
               styles: _escStyle(_style.kotTableContent, boldOverride: false),
             );
@@ -1460,7 +1733,7 @@ class EscPosFormatter {
         );
 
         for (int i = 0; i < wrapped.length; i++) {
-          b += g.text(
+          b += await _escPrintLine(g, 
             i == 0 ? '   ${wrapped[i]}' : wrapped[i],
             styles: _escStyle(_style.kotTableContent, boldOverride: false),
           );
@@ -1468,13 +1741,13 @@ class EscPosFormatter {
       }
     }
 
-    b += g.text(
+    b += await _escPrintLine(g, 
       lineEq,
       styles: const PosStyles(align: PosAlign.center, bold: true),
     );
 
-    b += g.text(
-      _padC('Powered by MyGenie', _width),
+    b += await _escPrintLine(g, 
+      _padC(PrintConfig.poweredByFooter, _width),
       styles: _escStyle(
         _style.footer,
         align: PosAlign.left,
@@ -1599,6 +1872,15 @@ class EscPosFormatter {
   static String _strikeText(String input) {
     const overlay = '\u0336';
     return input.split('').map((ch) => '$ch$overlay').join();
+  }
+
+  /// Latin wrap by char count splits Indic + English (e.g. "બરફી 100gm")
+  /// onto separate lines; keep Gujarati names as one raster line.
+  static List<String> _wrapItemName(String text, int width) {
+    final clean = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (clean.isEmpty) return [''];
+    if (_gujaratiRe.hasMatch(clean)) return [clean];
+    return _wrapText(clean, width);
   }
 
   static List<String> _wrapText(String text, int width) {

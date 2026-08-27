@@ -184,6 +184,7 @@ class RestaurantOrder {
       'delivery_address_type': delivery['address_type']?.toString() ?? '',
       'delivery_cust_address': delivery['address']?.toString() ?? '',
       'delivery_cust_pincode': delivery['pincode']?.toString() ?? '',
+      'station_gst_details': json['station_gst_details'] ?? [],
     };
   }
 
@@ -267,7 +268,7 @@ class RestaurantOrder {
       }
     }
 
-    final bill = Map<String, dynamic>.from(data['bill'] ?? {});
+    final bill = _billMapWithStationGst(data);
 
     final timeRaw = data['created_at']?.toString().trim() ?? '';
     final receivedAt =
@@ -321,7 +322,7 @@ class RestaurantOrder {
     }
 
     final kds = Map<String, dynamic>.from(data['kds'] ?? {});
-    final bill = Map<String, dynamic>.from(data['bill'] ?? {});
+    final bill = _billMapWithStationGst(data);
 
     if (kds.isEmpty) {
       throw Exception('KDS payload missing in fromTempKdsApi');
@@ -406,6 +407,27 @@ class RestaurantOrder {
         addonTotal += addonPrice * qty;
       }
 
+      // Variations (from food_details.options_to_add)
+      final optionData = (food['options_to_add'] as List?) ?? const [];
+      final List<String> variations = [];
+      double variationTotal = 0.0;
+      for (final o in optionData) {
+        final map = Map<String, dynamic>.from(o as Map);
+        final group = map['group'] is Map
+            ? Map<String, dynamic>.from(map['group'] as Map)
+            : <String, dynamic>{};
+        if (group['is_variant'] != true) continue;
+
+        final title = map['title']?.toString() ?? '';
+        final qty = int.tryParse(map['quantity']?.toString() ?? '1') ?? 1;
+        final price =
+            double.tryParse(map['price']?.toString() ?? '0') ?? 0.0;
+        if (title.isNotEmpty) {
+          variations.add('$title x$qty');
+        }
+        variationTotal += price * qty;
+      }
+
       return OrderItem(
         name: food['title']?.toString() ??
               food['name']?.toString() ??
@@ -420,6 +442,8 @@ class RestaurantOrder {
         foodStatus: detail['food_status'] is int
             ? detail['food_status']
             : int.tryParse(detail['food_status']?.toString() ?? ''),
+        variations: variations,
+        variationTotal: variationTotal,
         addons: addons,
         addonTotal: addonTotal,
         createdAt: detail['created_at'] != null
@@ -496,5 +520,24 @@ class RestaurantOrder {
       userCustPhone:  custPhone.isEmpty ? null : custPhone,
       billData:       billData,
     );
+  }
+
+  static Map<String, dynamic> _billMapWithStationGst(Map<String, dynamic> data) {
+    final rawBill = data['bill'];
+    final Map<String, dynamic> bill;
+    if (rawBill is Map) {
+      bill = Map<String, dynamic>.from(rawBill);
+    } else if (rawBill is List &&
+        rawBill.isNotEmpty &&
+        rawBill.first is Map) {
+      bill = Map<String, dynamic>.from(rawBill.first as Map);
+    } else {
+      bill = <String, dynamic>{};
+    }
+    if (bill['station_gst_details'] == null &&
+        data['station_gst_details'] != null) {
+      bill['station_gst_details'] = data['station_gst_details'];
+    }
+    return bill;
   }
 }

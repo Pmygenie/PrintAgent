@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:printer_agent/core/config/print_config.dart';
 import 'package:printer_agent/core/models/print_style_config.dart';
 import 'package:printer_agent/core/models/restaurant_order.dart';
 import 'package:printer_agent/core/printer/bitmap/print_style_extensions.dart';
@@ -114,7 +115,7 @@ class KotRenderer {
 
     canvas.drawRule(solid);
     canvas.drawText(
-      'Powered by MyGenie',
+      PrintConfig.poweredByFooter,
       canvas.styleFor(style.footer),
       align: TextAlign.center,
     );

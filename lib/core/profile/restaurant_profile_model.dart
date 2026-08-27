@@ -14,6 +14,7 @@ class RestaurantProfileModel {
   final String footerText;
   final String deliveryContactNo;
   final String kotLanguage;
+  final String restaurantFor;
 
   const RestaurantProfileModel({
     this.restaurantId = 0,
@@ -31,6 +32,7 @@ class RestaurantProfileModel {
     required this.footerText,
     required this.deliveryContactNo,
     this.kotLanguage = 'English',
+    this.restaurantFor = '',
   });
 
   factory RestaurantProfileModel.empty() {
@@ -65,6 +67,18 @@ class RestaurantProfileModel {
         ? Map<String, dynamic>.from(restaurant['settings'] as Map)
         : <String, dynamic>{};
 
+    final data = json['data'] is Map
+        ? Map<String, dynamic>.from(json['data'] as Map)
+        : <String, dynamic>{};
+
+    String restaurantForOf(dynamic v) => v?.toString().trim() ?? '';
+    final restaurantFor = [
+      restaurantForOf(restaurant['restaurant_for']),
+      restaurantForOf(settings['restaurant_for']),
+      restaurantForOf(json['restaurant_for']),
+      restaurantForOf(data['restaurant_for']),
+    ].firstWhere((v) => v.isNotEmpty, orElse: () => '');
+
     return RestaurantProfileModel(
       restaurantId: int.tryParse(restaurant['id']?.toString() ?? '') ?? 0,
       restaurantName: restaurant['name']?.toString() ?? '',
@@ -81,6 +95,7 @@ class RestaurantProfileModel {
       footerText: restaurant['footer_text']?.toString() ?? '',
       deliveryContactNo: restaurant['delivery_contact_no']?.toString() ?? '',
       kotLanguage: settings['kot_language']?.toString() ?? 'English',
+      restaurantFor: restaurantFor,
     );
   }
 
@@ -101,6 +116,7 @@ class RestaurantProfileModel {
       footerText: json['footerText']?.toString() ?? '',
       deliveryContactNo: json['deliveryContactNo']?.toString() ?? '',
       kotLanguage: json['kotLanguage']?.toString() ?? 'English',
+      restaurantFor: json['restaurantFor']?.toString() ?? '',
     );
   }
 
@@ -121,6 +137,7 @@ class RestaurantProfileModel {
       'footerText': footerText,
       'deliveryContactNo': deliveryContactNo,
       'kotLanguage': kotLanguage,
+      'restaurantFor': restaurantFor,
     };
   }
 

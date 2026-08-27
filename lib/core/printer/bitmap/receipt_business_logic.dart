@@ -130,6 +130,44 @@ class ReceiptBusinessLogic {
   static bool isAggregator(Map<String, dynamic> bill) =>
       bill['is_aggregator'] == true;
 
+  /// Station-wise GST rows for the bill footer (`station_gst_details`).
+  /// Shown only when restaurant profile `restaurant_for` is `food_court`.
+  static List<Map<String, String>> stationGstRows(
+    Map<dynamic, dynamic> bill, {
+    String restaurantFor = '',
+  }) {
+    if (restaurantFor.trim().toLowerCase() != 'food_court') {
+      return const [];
+    }
+    final raw = bill['station_gst_details'];
+    if (raw is! List) return const [];
+
+    final rows = <Map<String, String>>[];
+    for (final item in raw) {
+      if (item is! Map) continue;
+      final map = Map<String, dynamic>.from(item);
+      final name = map['station_name']?.toString().trim() ?? '';
+      if (name.isEmpty) continue;
+      final taxType = map['tax_type']?.toString().trim().toUpperCase() ?? '';
+      final gst =
+          double.tryParse(map['station_gst']?.toString() ?? '0') ?? 0.0;
+      final vat =
+          double.tryParse(map['station_vat']?.toString() ?? '0') ?? 0.0;
+      final amount = taxType == 'VAT'
+          ? vat
+          : taxType == 'GST'
+              ? gst
+              : (gst != 0 ? gst : vat);
+      final taxId = map['station_tax_id_number']?.toString().trim() ?? '';
+      rows.add({
+        'name': name,
+        'taxId': taxId == 'null' ? '' : taxId,
+        'gst': formatMoney(amount),
+      });
+    }
+    return rows;
+  }
+
   static bool get showBillItemDate =>
       PrintConfig.is80mm && PrintConfig.showItemDateOn80mm;
 

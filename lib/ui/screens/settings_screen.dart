@@ -32,6 +32,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _empIdCtrl          = TextEditingController();
   final _authTokenCtrl      = TextEditingController();
   final _restaurantNameCtrl = TextEditingController();
+  final _billFooterCtrl     = TextEditingController();
   final _kotCopiesCtrl      = TextEditingController();
   final _billCopiesCtrl     = TextEditingController();
   final _feedbackQrUrlCtrl  = TextEditingController();
@@ -83,6 +84,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _empIdCtrl.dispose();
     _authTokenCtrl.dispose();
     _restaurantNameCtrl.dispose();
+    _billFooterCtrl.dispose();
     _kotCopiesCtrl.dispose();
     _billCopiesCtrl.dispose();
     _feedbackQrUrlCtrl.dispose();
@@ -96,6 +98,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _empIdCtrl.text           = PrintConfig.empId;
     _authTokenCtrl.text       = PrintConfig.authToken;
     _restaurantNameCtrl.text  = PrintConfig.restaurantName;
+    _billFooterCtrl.text      = PrintConfig.poweredByFooter;
     _kotCopiesCtrl.text       = PrintConfig.kotCopies.toString();
     _billCopiesCtrl.text      = PrintConfig.billCopies.toString();
     _autoPrint                = PrintConfig.autoPrint;
@@ -277,6 +280,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               hint: '002', icon: Icons.badge),
           _field(controller: _restaurantNameCtrl, label: 'Restaurant Name',
               hint: 'Hogwarts', icon: Icons.storefront),
+          _field(controller: _billFooterCtrl, label: 'Bill Footer',
+              hint: 'Powered by MyGenie', icon: Icons.notes, readOnly: true),
           const SizedBox(height: 16),
 
           // ── Printers (dynamic list) ──────────────────────────────────────
