@@ -45,7 +45,10 @@ class PrinterAgentConfigMapper {
         _str(billFooter['footer_text'], PrintConfig.billFooterText);
 
     final paperSettings = _map(settingsConfig['paper_settings']);
-    PrintConfig.is80mm = _paperIs80mm(paperSettings['paper_size'], PrintConfig.is80mm);
+    PrintConfig.paperSize = _agentPaperSizeFromApi(
+      paperSettings['paper_size'],
+      PrintConfig.paperSize,
+    );
 
     final copies = _map(settingsConfig['print_copies']);
     PrintConfig.billCopies = _int(copies['bill_copy_count'], PrintConfig.billCopies);
@@ -244,10 +247,14 @@ class PrinterAgentConfigMapper {
     return fallback;
   }
 
-  static bool _paperIs80mm(dynamic value, bool fallback) {
+  static AgentPaperSize _agentPaperSizeFromApi(
+    dynamic value,
+    AgentPaperSize fallback,
+  ) {
     final s = value?.toString().toLowerCase() ?? '';
-    if (s.contains('80')) return true;
-    if (s.contains('58')) return false;
+    if (s.contains('a4')) return AgentPaperSize.a4;
+    if (s.contains('80')) return AgentPaperSize.mm80;
+    if (s.contains('58')) return AgentPaperSize.mm58;
     return fallback;
   }
 

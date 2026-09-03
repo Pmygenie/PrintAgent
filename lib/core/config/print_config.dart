@@ -193,6 +193,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 // ✅ UPDATED — Added bluetooth
 enum PrinterConnectionType { usb, lan, bluetooth }
 
+/// Agent paper size. 58/80mm are thermal receipts; A4 is a full-page bill PDF.
+enum AgentPaperSize { mm58, mm80, a4 }
+
 class PrintConfig {
   static bool autoPrint = true;
   static int kotCopies = 1;
@@ -209,7 +212,7 @@ class PrintConfig {
   static int restaurantId = 1;
   static String restaurantName = "MyGenie";
   static String printerName = "POS58 Printer";
-  static bool is80mm = false;
+  static AgentPaperSize paperSize = AgentPaperSize.mm58;
   static int usbVendorId = 19267;
   static int usbProductId = 14384;
   static String empId = "002";
@@ -242,6 +245,40 @@ class PrintConfig {
 
   // ── Helpers ───────────────────────────────────────────
   static bool get hasNoStations => stations.isEmpty;
+
+  static bool get isA4 => paperSize == AgentPaperSize.a4;
+
+  /// Thermal width flag used by ESC/POS, bitmap, and 58/80 PDF.
+  /// A4 bills use a separate layout; KOTs still print as 80mm when A4 is selected.
+  static bool get is80mm => paperSize != AgentPaperSize.mm58;
+
+  static String _paperSizeToPref(AgentPaperSize size) {
+    switch (size) {
+      case AgentPaperSize.a4:
+        return 'a4';
+      case AgentPaperSize.mm80:
+        return '80';
+      case AgentPaperSize.mm58:
+        return '58';
+    }
+  }
+
+  static AgentPaperSize _paperSizeFromPref(SharedPreferences p) {
+    final stored = p.getString('paperSize');
+    if (stored != null) {
+      switch (stored) {
+        case 'a4':
+          return AgentPaperSize.a4;
+        case '80':
+          return AgentPaperSize.mm80;
+        case '58':
+          return AgentPaperSize.mm58;
+      }
+    }
+    return (p.getBool('is80mm') ?? false)
+        ? AgentPaperSize.mm80
+        : AgentPaperSize.mm58;
+  }
 
   /// Feedback QR payload — uses configured URL, else falls back to the
   /// standard MyGenie feedback link with the numeric order id.
@@ -297,7 +334,7 @@ class PrintConfig {
     usePdfPrintingOnWindows = p.getBool('usePdfPrintingOnWindows') ?? false;
     usePdfForBillsOnly = p.getBool('usePdfForBillsOnly') ?? false;
     showItemDateOn80mm = p.getBool('showItemDateOn80mm') ?? false;
-    is80mm = p.getBool('is80mm') ?? false;
+    paperSize = _paperSizeFromPref(p);
 
     final stationsStr = p.getString('stations') ?? 'KDS';
     stations = stationsStr
@@ -345,7 +382,8 @@ class PrintConfig {
     await p.setString('authToken', authToken);
     await p.setString('printerName', printerName);
     await p.setString('restaurantName', restaurantName);
-    await p.setBool('is80mm', is80mm);
+    await p.setString('paperSize', _paperSizeToPref(paperSize));
+    await p.setBool('is80mm', paperSize != AgentPaperSize.mm58);
     await p.setInt('usbVendorId', usbVendorId);
     await p.setInt('usbProductId', usbProductId);
     await p.setString('stations', stations.join(','));

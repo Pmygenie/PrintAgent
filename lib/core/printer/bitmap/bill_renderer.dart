@@ -198,7 +198,7 @@ class BillRenderer {
     canvas.drawLabelValue('Item Total', itemTotal.toStringAsFixed(2), amountStyle);
     if (serviceCharge > 0) {
       canvas.drawLabelValue(
-          'Service Charge', serviceCharge.toStringAsFixed(2), amountStyle);
+          profile.serviceChargeLabel, serviceCharge.toStringAsFixed(2), amountStyle);
     }
     if (deliveryCharge > 0) {
       canvas.drawLabelValue(
@@ -260,6 +260,14 @@ class BillRenderer {
     }
     if (vatTax > 0) {
       canvas.drawLabelValue('VAT', vatTax.toStringAsFixed(2), amountStyle);
+    }
+    if (roomAdvance > 0) {
+      canvas.drawLabelValue(
+          'Room Advance', roomAdvance.toStringAsFixed(2), amountStyle);
+    }
+    if (roomPending > 0) {
+      canvas.drawLabelValue(
+          'Room Pending', roomPending.toStringAsFixed(2), amountStyle);
     }
 
     canvas.drawRule(solid);
@@ -324,11 +332,6 @@ class BillRenderer {
       }
 
       canvas.drawRule(solid);
-      canvas.drawLabelValue(
-          'Room Advance', roomAdvance.toStringAsFixed(2), amountStyle);
-      canvas.drawLabelValue(
-          'Room Pending', roomPending.toStringAsFixed(2), amountStyle);
-      canvas.drawRule(solid);
       canvas.drawLeftRight(
         'GRAND TOTAL ${ReceiptBusinessLogic.payLabel(bill)}',
         'Rs.${grantAmount.toStringAsFixed(0)}',
@@ -337,13 +340,6 @@ class BillRenderer {
     }
 
     canvas.drawRule(solid);
-    if (profile.footerText.isNotEmpty) {
-      canvas.drawText(
-        profile.footerText,
-        canvas.styleFor(style.footer),
-        align: TextAlign.center,
-      );
-    }
     canvas.drawText(
       PrintConfig.poweredByFooter,
       canvas.styleFor(style.footer).copyWith(fontWeight: FontWeight.bold),

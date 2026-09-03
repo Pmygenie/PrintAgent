@@ -15,6 +15,7 @@ class RestaurantProfileModel {
   final String deliveryContactNo;
   final String kotLanguage;
   final String restaurantFor;
+  final String serviceChargeText;
 
   const RestaurantProfileModel({
     this.restaurantId = 0,
@@ -33,7 +34,13 @@ class RestaurantProfileModel {
     required this.deliveryContactNo,
     this.kotLanguage = 'English',
     this.restaurantFor = '',
+    this.serviceChargeText = 'Service Charge',
   });
+
+  String get serviceChargeLabel {
+    final label = serviceChargeText.trim();
+    return label.isEmpty ? 'Service Charge' : label;
+  }
 
   factory RestaurantProfileModel.empty() {
     return const RestaurantProfileModel(
@@ -96,6 +103,8 @@ class RestaurantProfileModel {
       deliveryContactNo: restaurant['delivery_contact_no']?.toString() ?? '',
       kotLanguage: settings['kot_language']?.toString() ?? 'English',
       restaurantFor: restaurantFor,
+      serviceChargeText:
+          settings['service_chrg_taxt']?.toString().trim() ?? 'Service Charge',
     );
   }
 
@@ -117,6 +126,8 @@ class RestaurantProfileModel {
       deliveryContactNo: json['deliveryContactNo']?.toString() ?? '',
       kotLanguage: json['kotLanguage']?.toString() ?? 'English',
       restaurantFor: json['restaurantFor']?.toString() ?? '',
+      serviceChargeText:
+          json['serviceChargeText']?.toString().trim() ?? 'Service Charge',
     );
   }
 
@@ -138,6 +149,7 @@ class RestaurantProfileModel {
       'deliveryContactNo': deliveryContactNo,
       'kotLanguage': kotLanguage,
       'restaurantFor': restaurantFor,
+      'serviceChargeText': serviceChargeText,
     };
   }
 

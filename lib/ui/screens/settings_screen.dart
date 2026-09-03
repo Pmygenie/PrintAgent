@@ -47,7 +47,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _aggregatorAutoBillStage = 'Acknowledged';
   bool _scanOrderAutoPrint = false;
   bool _obscureToken  = true;
-  bool _is80mm        = false;
+  AgentPaperSize _paperSize = AgentPaperSize.mm58;
   bool _usePdfPrintingOnWindows = true;
   bool _showItemDateOn80mm = false;
   bool _feedbackQrEnabled = false;
@@ -108,7 +108,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _aggregatorAutoBill       = PrintConfig.aggregatorAutoBill;
     _aggregatorAutoBillStage  = PrintConfig.aggregatorAutoBillStage;
     _scanOrderAutoPrint       = PrintConfig.scanOrderAutoPrint;
-    _is80mm                   = PrintConfig.is80mm;
+    _paperSize                = PrintConfig.paperSize;
     _usePdfPrintingOnWindows  = PrintConfig.usePdfPrintingOnWindows;
     _showItemDateOn80mm       = PrintConfig.showItemDateOn80mm;
     _feedbackQrEnabled        = PrintConfig.feedbackQrEnabled;
@@ -163,7 +163,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     PrintConfig.aggregatorAutoBill       = _aggregatorAutoBill;
     PrintConfig.aggregatorAutoBillStage  = _aggregatorAutoBillStage;
     PrintConfig.scanOrderAutoPrint       = _scanOrderAutoPrint;
-    PrintConfig.is80mm                   = _is80mm;
+    PrintConfig.paperSize                = _paperSize;
     PrintConfig.usePdfPrintingOnWindows  = _usePdfPrintingOnWindows;
     PrintConfig.showItemDateOn80mm       = _showItemDateOn80mm;
     PrintConfig.feedbackQrEnabled        = _feedbackQrEnabled;
@@ -228,7 +228,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (_) => _PrinterFormSheet(
-        is80mm:       _is80mm,
+        is80mm:       _paperSize != AgentPaperSize.mm58,
         initial:      existing,
         onConfirmed:  (cfg) {
           setState(() {
@@ -337,8 +337,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _sectionHeader('📄 Paper & Copies'),
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
-            child: DropdownButtonFormField<bool>(
-              value: _is80mm,
+            child: DropdownButtonFormField<AgentPaperSize>(
+              value: _paperSize,
               decoration: const InputDecoration(
                 labelText: 'Paper Size (applied to all printers)',
                 prefixIcon: Icon(Icons.straighten),
@@ -346,10 +346,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 filled: true,
               ),
               items: const [
-                DropdownMenuItem(value: false, child: Text('58mm — Small receipt')),
-                DropdownMenuItem(value: true,  child: Text('80mm — Wide receipt')),
+                DropdownMenuItem(
+                  value: AgentPaperSize.mm58,
+                  child: Text('58mm — Small receipt'),
+                ),
+                DropdownMenuItem(
+                  value: AgentPaperSize.mm80,
+                  child: Text('80mm — Wide receipt'),
+                ),
+                DropdownMenuItem(
+                  value: AgentPaperSize.a4,
+                  child: Text('A4 — Full page bill'),
+                ),
               ],
-              onChanged: (v) => setState(() => _is80mm = v ?? false),
+              onChanged: (v) => setState(() {
+                _paperSize = v ?? AgentPaperSize.mm58;
+              }),
             ),
           ),
           _field(controller: _billCopiesCtrl, label: 'Bill Copies',

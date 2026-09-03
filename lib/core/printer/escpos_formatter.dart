@@ -974,7 +974,7 @@ class EscPosFormatter {
     if (serviceCharge > 0) {
       b += await _escPrintLine(g, 
         _alignRightLabelValue(
-            'Service Charge', serviceCharge.toStringAsFixed(2)),
+            profile.serviceChargeLabel, serviceCharge.toStringAsFixed(2)),
         styles: _escStyle(_style.billAmountLine),
       );
     }
@@ -1093,6 +1093,18 @@ class EscPosFormatter {
         styles: _escStyle(_style.billAmountLine),
       );
     }
+    if (roomAdvance > 0) {
+      b += await _escPrintLine(g, 
+        _alignRightLabelValue('Room Advance', roomAdvance.toStringAsFixed(2)),
+        styles: _escStyle(_style.billAmountLine),
+      );
+    }
+    if (roomPending > 0) {
+      b += await _escPrintLine(g, 
+        _alignRightLabelValue('Room Pending', roomPending.toStringAsFixed(2)),
+        styles: _escStyle(_style.billAmountLine),
+      );
+    }
 
     b += await _escPrintLine(g, lineDashes,
         styles: const PosStyles(align: PosAlign.center, bold: true));
@@ -1206,18 +1218,6 @@ class EscPosFormatter {
           styles: const PosStyles(align: PosAlign.center, bold: true));
 
       b += await _escPrintLine(g, 
-        _alignRightLabelValue('Room Advance', roomAdvance.toStringAsFixed(2)),
-        styles: _escStyle(_style.billAmountLine),
-      );
-      b += await _escPrintLine(g, 
-        _alignRightLabelValue('Room Pending', roomPending.toStringAsFixed(2)),
-        styles: _escStyle(_style.billAmountLine),
-      );
-
-      b += await _escPrintLine(g, lineDashes,
-          styles: const PosStyles(align: PosAlign.center, bold: true));
-
-      b += await _escPrintLine(g, 
         _alignLR('GRAND TOTAL ${payLabel()}',
             'Rs.${grantAmount.toStringAsFixed(0)}'),
         styles: _escStyle(_style.billGrandTotal, align: PosAlign.center),
@@ -1244,11 +1244,6 @@ class EscPosFormatter {
     // ── Footer ───────────────────────────────────────────
     b += await _escPrintLine(g, lineEquals,
         styles: const PosStyles(align: PosAlign.center, bold: true));
-    if (profile.footerText.isNotEmpty)
-      b += await _escPrintLine(g, 
-        profile.footerText,
-        styles: _escStyle(_style.footer, align: PosAlign.center),
-      );
     b += await _escPrintLine(g, 
       PrintConfig.poweredByFooter,
       styles: _escStyle(

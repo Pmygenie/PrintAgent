@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printer_agent/core/models/print_style_config.dart';
+import 'package:printer_agent/core/printer/a4_bill_formatter.dart';
 import 'package:printer_agent/core/printer/receipt_text_renderer.dart';
 import 'package:printer_agent/core/services/print_style_service.dart';
 import 'package:printing/printing.dart';
@@ -89,11 +90,17 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
   }
 
   static Future<Uint8List> format(PrintJob job) async {
-    _style = await PrintStyleService.getConfig();
-    await _ensureFonts();
     ReceiptTextRenderer.clearCache();
 
     final pdf = pw.Document();
+
+    if (job.type == PrintType.bill && PrintConfig.isA4) {
+      pdf.addPage(await A4BillFormatter.buildPage(job.order));
+      return pdf.save();
+    }
+
+    _style = await PrintStyleService.getConfig();
+    await _ensureFonts();
 
     switch (job.type) {
       case PrintType.kot:
@@ -267,7 +274,7 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
 
     return PdfPageFormat(
       widthMm * PdfPageFormat.mm,
-      800,
+      80000,
       marginLeft: _style.marginLeftMm * PdfPageFormat.mm,
       marginRight: _style.marginRightMm * PdfPageFormat.mm,
       marginTop: _style.marginTopMm * PdfPageFormat.mm,
@@ -754,7 +761,7 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
         ..._billAmountLineWidgets('Item Total', itemTotal.toStringAsFixed(2)),
         if (serviceCharge > 0)
           ..._billAmountLineWidgets(
-            'Service Charge',
+            profile.serviceChargeLabel,
             serviceCharge.toStringAsFixed(2),
           ),
         if (deliveryCharge > 0)
@@ -789,13 +796,23 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
         ],
         if (vatTax > 0)
           ..._billAmountLineWidgets('VAT', vatTax.toStringAsFixed(2)),
+        if (roomAdvance > 0)
+          ..._billAmountLineWidgets(
+            'Room Advance',
+            roomAdvance.toStringAsFixed(2),
+          ),
+        if (roomPending > 0)
+          ..._billAmountLineWidgets(
+            'Room Pending',
+            roomPending.toStringAsFixed(2),
+          ),
 
         // ── Total ──
         _simpleDividerOrDotted ? _divider(dashed: true) : buildDottedLine(180),
 
         ..._billTotalRow(totalLabel, _formatMoney(totalAmount),
             _billTotalTextSize, _billTotalTextBold,
-            subLabel: isAggregator ? null : payLabel()),
+            subLabel: (isAggregator || isRoomOrder) ? null : payLabel()),
 
         // ── Delivery details ──
         if (bill['order_type']?.toString() == 'delivery' && !isAggregator) ...[
@@ -834,8 +851,6 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
               : buildDottedLine(180),
           ..._roomOrderWidgets(
             associatedOrders,
-            roomAdvance,
-            roomPending,
             grantAmount,
             payLabel(),
           ),
@@ -871,19 +886,6 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
 
         // ── Footer ──
         _divider(),
-
-        if (profile.footerText.isNotEmpty) ...[
-          pw.SizedBox(
-            width: double.infinity,
-            child: pw.Text(
-              profile.footerText,
-              style: _text(size: _footerSize, bold: _footerBold),
-              textAlign: pw.TextAlign.center,
-            ),
-          ),
-          pw.SizedBox(
-              height: 4), // ← spacing between footer text and "Powered by"
-        ],
 
         pw.Center(
           child: pw.Text(
@@ -1721,8 +1723,6 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
 
   static List<pw.Widget> _roomOrderWidgets(
     List<dynamic> associatedOrders,
-    double roomAdvance,
-    double roomPending,
     double grantAmount,
     String payLabel,
   ) {
@@ -1754,18 +1754,6 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
         ),
       );
     }
-
-    widgets.add(
-        _simpleDividerOrDotted ? _divider(dashed: true) : buildDottedLine(180));
-
-    widgets.addAll(_billAmountLineWidgets(
-      'Room Advance',
-      roomAdvance.toStringAsFixed(2),
-    ));
-    widgets.addAll(_billAmountLineWidgets(
-      'Room Pending',
-      roomPending.toStringAsFixed(2),
-    ));
 
     widgets.add(
         _simpleDividerOrDotted ? _divider(dashed: true) : buildDottedLine(180));

@@ -34,7 +34,7 @@ class PrinterManager {
 
     final shouldUseWindowsPdf = Platform.isWindows &&
         config.type == PrinterType.usb &&
-        PrintConfig.usePdfPrintingOnWindows;
+        (PrintConfig.usePdfPrintingOnWindows || PrintConfig.isA4);
     // log('PDF DEBUG => isWindows=${Platform.isWindows}, usePdfPrintingOnWindows=${PrintConfig.usePdfPrintingOnWindows}, usePdfForBillsOnly=${PrintConfig.usePdfForBillsOnly},jobType=${job.type}, printerType=${config.type},shouldUseWindowsPdf=$shouldUseWindowsPdf');
 
     if (shouldUseWindowsPdf) {

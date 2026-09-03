@@ -123,9 +123,15 @@ class ReceiptBusinessLogic {
   }
 
   static bool isRoomOrder(Map<String, dynamic> bill) {
-    final associated = bill['associated_orders'] as List<dynamic>?;
-    return associated != null && associated.isNotEmpty;
+    final associated = bill['associated_orders'];
+    return associated is List && associated.isNotEmpty;
   }
+
+  static double roomAdvance(Map<String, dynamic> bill) =>
+      billAmount(bill, 'room_advance_pay');
+
+  static double roomPending(Map<String, dynamic> bill) =>
+      billAmount(bill, 'room_remaining_pay');
 
   static bool isAggregator(Map<String, dynamic> bill) =>
       bill['is_aggregator'] == true;
