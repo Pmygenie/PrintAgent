@@ -758,7 +758,11 @@ class A4BillFormatter {
       MapEntry('Name', bill['delivery_cust_name']?.toString() ?? ''),
       MapEntry('Phone', bill['delivery_cust_phone']?.toString() ?? ''),
       MapEntry('Add. Type', bill['delivery_address_type']?.toString() ?? ''),
+      MapEntry('House', bill['delivery_cust_house']?.toString() ?? ''),
+      MapEntry('Floor', bill['delivery_cust_floor']?.toString() ?? ''),
       MapEntry('Address', bill['delivery_cust_address']?.toString() ?? ''),
+      MapEntry('City', bill['delivery_cust_city']?.toString() ?? ''),
+      MapEntry('State', bill['delivery_cust_state']?.toString() ?? ''),
       MapEntry('Pincode', bill['delivery_cust_pincode']?.toString() ?? ''),
     ].where((e) => e.value.trim().isNotEmpty).toList();
 

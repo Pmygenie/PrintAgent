@@ -58,7 +58,9 @@ class RestaurantOrder {
         .map((d) => OrderItem.fromJson(Map<String, dynamic>.from(d)))
         .toList();
 
-    final timeRaw = json['created_at']?.toString().trim() ?? '';
+    final timeRaw = json['updated_at']?.toString().trim().isNotEmpty == true
+        ? json['updated_at'].toString().trim()
+        : json['created_at']?.toString().trim() ?? '';
     final receivedAt =
         timeRaw.isNotEmpty ? DateTime.parse(timeRaw).toLocal() : DateTime.now();
     final user =
@@ -270,7 +272,9 @@ class RestaurantOrder {
 
     final bill = _billMapWithStationGst(data);
 
-    final timeRaw = data['created_at']?.toString().trim() ?? '';
+    final timeRaw = data['updated_at']?.toString().trim().isNotEmpty == true
+        ? data['updated_at'].toString().trim()
+        : data['created_at']?.toString().trim() ?? '';
     final receivedAt =
         timeRaw.isNotEmpty ? DateTime.parse(timeRaw).toLocal() : DateTime.now();
 
@@ -334,9 +338,9 @@ class RestaurantOrder {
     final tableName = kds['table_name']?.toString().trim() ?? '';
     final printKot = kds['print_kot']?.toString().trim() ?? 'Yes';
 
-    final dateTimeRaw = kds['created_at']?.toString().trim().isNotEmpty == true
-        ? kds['created_at'].toString().trim()
-        : kds['updated_at']?.toString().trim() ?? '';
+    final dateTimeRaw = kds['updated_at']?.toString().trim().isNotEmpty == true
+        ? kds['updated_at'].toString().trim()
+        : kds['created_at']?.toString().trim() ?? '';
 
     if (dateTimeRaw.isEmpty) {
       throw Exception('KDS datetime missing in fromTempKdsApi');
@@ -452,7 +456,9 @@ class RestaurantOrder {
       );
     }).toList();
 
-    final timeRaw   = orderInfo['created_at']?.toString().trim() ?? '';
+    final timeRaw = orderInfo['updated_at']?.toString().trim().isNotEmpty == true
+        ? orderInfo['updated_at'].toString().trim()
+        : orderInfo['created_at']?.toString().trim() ?? '';
     final receivedAt = timeRaw.isNotEmpty
         ? (DateTime.tryParse(timeRaw)?.toLocal() ?? DateTime.now())
         : DateTime.now();

@@ -1712,7 +1712,11 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
     addRow('Name', bill['delivery_cust_name']?.toString() ?? '');
     addRow('Phone', bill['delivery_cust_phone']?.toString() ?? '');
     addRow('Add. Type', bill['delivery_address_type']?.toString() ?? '');
+    addRow('House', bill['delivery_cust_house']?.toString() ?? '');
+    addRow('Floor', bill['delivery_cust_floor']?.toString() ?? '');
     addRow('Address', bill['delivery_cust_address']?.toString() ?? '');
+    addRow('City', bill['delivery_cust_city']?.toString() ?? '');
+    addRow('State', bill['delivery_cust_state']?.toString() ?? '');
     addRow('Pincode', bill['delivery_cust_pincode']?.toString() ?? '');
 
     return widgets;

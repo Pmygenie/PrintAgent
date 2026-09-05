@@ -11,6 +11,7 @@ import '../models/print_job.dart';
 import '../models/restaurant_order.dart';
 import '../config/print_config.dart';
 import '../config/app_constants.dart';
+import '../printer/kot_separate_ticket.dart';
 import '../services/printer_agent_config_sync_service.dart';
 
 class WindowsSocketService {
@@ -260,7 +261,14 @@ class WindowsSocketService {
         final order = RestaurantOrder.fromJson(orderMap);
 
         // ── GATE 3: Auto print check ──────────────────────────────────
-        if (!PrintConfig.autoPrint) {
+        // Cancel KOT uses its own toggle; normal KOT uses Auto Print KOT.
+        if (eventType == 'update-order-status') {
+          if (!PrintConfig.autoPrintCancelKot) {
+            _log(
+                '⏸️ Auto Print Cancel KOT OFF — skip #${order.displayOrderId}');
+            return;
+          }
+        } else if (!PrintConfig.autoPrint) {
           _log('⏸️ Auto print OFF — skip #${order.displayOrderId}');
           return;
         }
@@ -323,14 +331,13 @@ class WindowsSocketService {
               items: stationItems,
             );
 
-            for (final printerId in printerIds) {
-              _queueManager.route(PrintJob(
-                type: PrintType.kot,
-                printerId: printerId,
-                order: stationOrder,
-                stationLabel: station,
-              ));
-            }
+            KotSeparateTicket.queue(
+              queueManager: _queueManager,
+              printerIds: printerIds,
+              type: PrintType.kot,
+              order: stationOrder,
+              stationLabel: station,
+            );
             _log(
                 '🖨️ Scan KOT [$station] → ${printerIds.join(', ')} (${stationItems.length} items) #${order.displayOrderId}');
           }
@@ -396,14 +403,13 @@ class WindowsSocketService {
               items: stationItems,
             );
 
-            for (final printerId in printerIds) {
-              _queueManager.route(PrintJob(
-                type: PrintType.kot,
-                printerId: printerId,
-                order: stationOrder,
-                stationLabel: station,
-              ));
-            }
+            KotSeparateTicket.queue(
+              queueManager: _queueManager,
+              printerIds: printerIds,
+              type: PrintType.kot,
+              order: stationOrder,
+              stationLabel: station,
+            );
             _log(
                 '🖨️ Web update KOT [$station] → ${printerIds.join(', ')} (${stationItems.length} items) #${order.displayOrderId}');
           }
@@ -507,14 +513,13 @@ class WindowsSocketService {
               ? PrintType.cancelKot
               : PrintType.kot;
 
-          for (final printerId in printerIds) {
-            _queueManager.route(PrintJob(
-              type: jobType,
-              printerId: printerId,
-              order: stationOrder,
-              stationLabel: station,
-            ));
-          }
+          KotSeparateTicket.queue(
+            queueManager: _queueManager,
+            printerIds: printerIds,
+            type: jobType,
+            order: stationOrder,
+            stationLabel: station,
+          );
 
           final label = jobType == PrintType.cancelKot
               ? '🚫 Queued CANCEL KOT'
@@ -646,14 +651,13 @@ class WindowsSocketService {
             final printerIds = _router.resolveForStation(station);
             if (printerIds.isEmpty) continue;
 
-            for (final printerId in printerIds) {
-              _queueManager.route(PrintJob(
-                type: PrintType.kot,
-                printerId: printerId,
-                order: stationOrder,
-                stationLabel: station,
-              ));
-            }
+            KotSeparateTicket.queue(
+              queueManager: _queueManager,
+              printerIds: printerIds,
+              type: PrintType.kot,
+              order: stationOrder,
+              stationLabel: station,
+            );
 
             _log(
                 '🖨️ KOT queued [$station] → ${printerIds.join(', ')} (${stationOrder.items.length} items) #$orderId');
@@ -986,14 +990,13 @@ class WindowsSocketService {
         items: stationItems,
       );
 
-      for (final printerId in printerIds) {
-        _queueManager.route(PrintJob(
-          type: jobType,
-          printerId: printerId,
-          order: stationOrder,
-          stationLabel: station,
-        ));
-      }
+      KotSeparateTicket.queue(
+        queueManager: _queueManager,
+        printerIds: printerIds,
+        type: jobType,
+        order: stationOrder,
+        stationLabel: station,
+      );
       _log(
           '$logLabel [$station] → ${printerIds.join(', ')} (${stationItems.length} items) #$orderId');
     }

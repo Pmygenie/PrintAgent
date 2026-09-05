@@ -1142,7 +1142,11 @@ class EscPosFormatter {
       final custName = bill['delivery_cust_name']?.toString() ?? '';
       final phone = bill['delivery_cust_phone']?.toString() ?? '';
       final addrType = bill['delivery_address_type']?.toString() ?? '';
+      final house = bill['delivery_cust_house']?.toString() ?? '';
+      final floor = bill['delivery_cust_floor']?.toString() ?? '';
       final addr = bill['delivery_cust_address']?.toString() ?? '';
+      final city = bill['delivery_cust_city']?.toString() ?? '';
+      final state = bill['delivery_cust_state']?.toString() ?? '';
       final pincode = bill['delivery_cust_pincode']?.toString() ?? '';
 
       String row(String label, String value) {
@@ -1182,8 +1186,24 @@ class EscPosFormatter {
         b += await _escPrintLine(g, row('Add. Type', addrType),
             styles: _escStyle(_style.deliveryContent));
       }
+      if (house.isNotEmpty) {
+        b += await _escPrintLine(g, row('House', house),
+            styles: _escStyle(_style.deliveryContent));
+      }
+      if (floor.isNotEmpty) {
+        b += await _escPrintLine(g, row('Floor', floor),
+            styles: _escStyle(_style.deliveryContent));
+      }
       if (addr.isNotEmpty) {
         b += await _escPrintLine(g, row('Address', addr),
+            styles: _escStyle(_style.deliveryContent));
+      }
+      if (city.isNotEmpty) {
+        b += await _escPrintLine(g, row('City', city),
+            styles: _escStyle(_style.deliveryContent));
+      }
+      if (state.isNotEmpty) {
+        b += await _escPrintLine(g, row('State', state),
             styles: _escStyle(_style.deliveryContent));
       }
       if (pincode.isNotEmpty) {

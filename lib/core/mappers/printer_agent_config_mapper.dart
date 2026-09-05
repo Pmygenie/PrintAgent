@@ -58,7 +58,10 @@ class PrinterAgentConfigMapper {
     PrintConfig.autoPrintBill = _yesNo(autoPrinting['auto_print_bill'], PrintConfig.autoPrintBill);
     PrintConfig.autoPrint = _yesNo(autoPrinting['auto_print_kot'], PrintConfig.autoPrint);
     PrintConfig.autoSettle = _yesNo(autoPrinting['auto_settle'], PrintConfig.autoSettle);
+    PrintConfig.autoPrintCancelKot = _yesNo(
+        autoPrinting['auto_print_cancel_kot'], PrintConfig.autoPrintCancelKot);
     PrintConfig.scanOrderAutoPrint = _yesNo(autoPrinting['scan_order_auto_print'], PrintConfig.scanOrderAutoPrint);
+    PrintConfig.kotSeparateTicket = _yesNo(autoPrinting['kot_separate_ticket'], PrintConfig.kotSeparateTicket);
     PrintConfig.aggregatorAutoKot = _yesNo(autoPrinting['aggregator_auto_kot'], PrintConfig.aggregatorAutoKot);
     PrintConfig.aggregatorAutoBill = _yesNo(autoPrinting['aggregator_auto_bill'], PrintConfig.aggregatorAutoBill);
     final stage = _str(autoPrinting['aggregator_auto_bill_stage'], PrintConfig.aggregatorAutoBillStage);

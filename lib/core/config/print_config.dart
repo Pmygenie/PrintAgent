@@ -202,10 +202,13 @@ class PrintConfig {
   static int billCopies = 1;
   static bool autoPrintBill = true;
   static bool autoSettle = false;
+  /// Normal POS Cancel KOT (`update-order-status`). Independent of [autoPrint].
+  static bool autoPrintCancelKot = true;
   static bool aggregatorAutoKot = false;
   static bool aggregatorAutoBill = false;
   static String aggregatorAutoBillStage = 'Acknowledged';
   static bool scanOrderAutoPrint = false;
+  static bool kotSeparateTicket = false;
   static bool usePdfPrintingOnWindows = true;
   static bool usePdfForBillsOnly = false;
   static bool showItemDateOn80mm = false;
@@ -313,6 +316,7 @@ class PrintConfig {
     autoPrint = p.getBool('autoPrint') ?? true;
     autoPrintBill = p.getBool('autoPrintBill') ?? true;
     autoSettle = p.getBool('autoSettle') ?? false;
+    autoPrintCancelKot = p.getBool('autoPrintCancelKot') ?? true;
     aggregatorAutoKot = p.getBool('aggregatorAutoKot') ?? false;
     aggregatorAutoBill = p.getBool('aggregatorAutoBill') ?? false;
     aggregatorAutoBillStage =
@@ -322,6 +326,7 @@ class PrintConfig {
       aggregatorAutoBillStage = 'Acknowledged';
     }
     scanOrderAutoPrint = p.getBool('scanOrderAutoPrint') ?? false;
+    kotSeparateTicket = p.getBool('kotSeparateTicket') ?? false;
     kotCopies = p.getInt('kotCopies') ?? 1;
     billCopies = p.getInt('billCopies') ?? 1;
     restaurantId = p.getInt('restaurantId') ?? 618;
@@ -371,10 +376,12 @@ class PrintConfig {
     await p.setBool('autoPrint', autoPrint);
     await p.setBool('autoPrintBill', autoPrintBill);
     await p.setBool('autoSettle', autoSettle);
+    await p.setBool('autoPrintCancelKot', autoPrintCancelKot);
     await p.setBool('aggregatorAutoKot', aggregatorAutoKot);
     await p.setBool('aggregatorAutoBill', aggregatorAutoBill);
     await p.setString('aggregatorAutoBillStage', aggregatorAutoBillStage);
     await p.setBool('scanOrderAutoPrint', scanOrderAutoPrint);
+    await p.setBool('kotSeparateTicket', kotSeparateTicket);
     await p.setInt('kotCopies', kotCopies);
     await p.setInt('billCopies', billCopies);
     await p.setInt('restaurantId', restaurantId);

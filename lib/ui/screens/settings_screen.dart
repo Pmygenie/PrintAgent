@@ -41,11 +41,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // ── Global print toggles ─────────────────────────────────────────────────
   bool _autoPrint     = true;
   bool _autoPrintBill = true;
+  bool _autoPrintCancelKot = true;
   bool _autoSettle = false;
   bool _aggregatorAutoKot  = false;
   bool _aggregatorAutoBill = false;
   String _aggregatorAutoBillStage = 'Acknowledged';
   bool _scanOrderAutoPrint = false;
+  bool _kotSeparateTicket = false;
   bool _obscureToken  = true;
   AgentPaperSize _paperSize = AgentPaperSize.mm58;
   bool _usePdfPrintingOnWindows = true;
@@ -103,11 +105,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _billCopiesCtrl.text      = PrintConfig.billCopies.toString();
     _autoPrint                = PrintConfig.autoPrint;
     _autoPrintBill            = PrintConfig.autoPrintBill;
+    _autoPrintCancelKot       = PrintConfig.autoPrintCancelKot;
     _autoSettle               = PrintConfig.autoSettle;
     _aggregatorAutoKot        = PrintConfig.aggregatorAutoKot;
     _aggregatorAutoBill       = PrintConfig.aggregatorAutoBill;
     _aggregatorAutoBillStage  = PrintConfig.aggregatorAutoBillStage;
     _scanOrderAutoPrint       = PrintConfig.scanOrderAutoPrint;
+    _kotSeparateTicket        = PrintConfig.kotSeparateTicket;
     _paperSize                = PrintConfig.paperSize;
     _usePdfPrintingOnWindows  = PrintConfig.usePdfPrintingOnWindows;
     _showItemDateOn80mm       = PrintConfig.showItemDateOn80mm;
@@ -158,11 +162,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     PrintConfig.billCopies               = int.tryParse(_billCopiesCtrl.text) ?? 1;
     PrintConfig.autoPrint                = _autoPrint;
     PrintConfig.autoPrintBill            = _autoPrintBill;
+    PrintConfig.autoPrintCancelKot       = _autoPrintCancelKot;
     PrintConfig.autoSettle               = _autoSettle;
     PrintConfig.aggregatorAutoKot        = _aggregatorAutoKot;
     PrintConfig.aggregatorAutoBill       = _aggregatorAutoBill;
     PrintConfig.aggregatorAutoBillStage  = _aggregatorAutoBillStage;
     PrintConfig.scanOrderAutoPrint       = _scanOrderAutoPrint;
+    PrintConfig.kotSeparateTicket        = _kotSeparateTicket;
     PrintConfig.paperSize                = _paperSize;
     PrintConfig.usePdfPrintingOnWindows  = _usePdfPrintingOnWindows;
     PrintConfig.showItemDateOn80mm       = _showItemDateOn80mm;
@@ -392,6 +398,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChanged: (v) => setState(() => _autoPrint = v),
           ),
           _toggle(
+            label:    'Auto Print Cancel KOT',
+            subtitle: 'Print Cancel KOT when items are cancelled (normal POS)',
+            value:    _autoPrintCancelKot,
+            onChanged: (v) => setState(() => _autoPrintCancelKot = v),
+          ),
+          _toggle(
             label:    'Auto Print Bill',
             subtitle: 'Print bill on manually_print bill event',
             value:    _autoPrintBill,
@@ -408,6 +420,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: 'Print KOT automatically for scanned (scan-new-order) orders',
             value:    _scanOrderAutoPrint,
             onChanged: (v) => setState(() => _scanOrderAutoPrint = v),
+          ),
+          _toggle(
+            label:    'KOT separate ticket',
+            subtitle: 'Print each countable KOT item as its own ticket',
+            value:    _kotSeparateTicket,
+            onChanged: (v) => setState(() => _kotSeparateTicket = v),
           ),
           const SizedBox(height: 16),
 

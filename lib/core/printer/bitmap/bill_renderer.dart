@@ -294,7 +294,11 @@ class BillRenderer {
       final dName = bill['delivery_cust_name']?.toString() ?? '';
       final phone = bill['delivery_cust_phone']?.toString() ?? '';
       final addrType = bill['delivery_address_type']?.toString() ?? '';
+      final house = bill['delivery_cust_house']?.toString() ?? '';
+      final floor = bill['delivery_cust_floor']?.toString() ?? '';
       final addr = bill['delivery_cust_address']?.toString() ?? '';
+      final city = bill['delivery_cust_city']?.toString() ?? '';
+      final state = bill['delivery_cust_state']?.toString() ?? '';
       final pincode = bill['delivery_cust_pincode']?.toString() ?? '';
       final deliveryStyle = canvas.styleFor(style.deliveryContent);
 
@@ -303,7 +307,19 @@ class BillRenderer {
       if (addrType.isNotEmpty) {
         _drawLabelBlock(canvas, 'Add. Type', addrType, deliveryStyle);
       }
+      if (house.isNotEmpty) {
+        _drawLabelBlock(canvas, 'House', house, deliveryStyle);
+      }
+      if (floor.isNotEmpty) {
+        _drawLabelBlock(canvas, 'Floor', floor, deliveryStyle);
+      }
       if (addr.isNotEmpty) _drawLabelBlock(canvas, 'Address', addr, deliveryStyle);
+      if (city.isNotEmpty) {
+        _drawLabelBlock(canvas, 'City', city, deliveryStyle);
+      }
+      if (state.isNotEmpty) {
+        _drawLabelBlock(canvas, 'State', state, deliveryStyle);
+      }
       if (pincode.isNotEmpty) {
         _drawLabelBlock(canvas, 'Pincode', pincode, deliveryStyle);
       }

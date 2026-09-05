@@ -13,6 +13,8 @@ import 'bitmap/bitmap_print_config.dart';
 import 'ble_session_registry.dart';
 import 'bluetooth_print_lock.dart';
 import 'escpos_formatter.dart';
+import 'usb_print_lock.dart';
+import 'usb_session_registry.dart';
 import '../../drivers/printer_driver.dart';
 import '../../drivers/lan_driver.dart';
 import '../../drivers/usb_driver.dart';
@@ -99,6 +101,30 @@ class PrinterManager {
         );
       });
       log('🔓 BT lock release | Order Id - ${job.order.displayOrderId}');
+      return;
+    }
+
+    // USB keep-alive (Android): connect once per device, reuse session, no
+    // per-job disconnect. Kitchen + Bill can share one device, so serialize.
+    final isUsbKeepAlive = config.type == PrinterType.usb && !Platform.isWindows;
+
+    if (isUsbKeepAlive) {
+      log('🔒 USB lock acquire | Order Id - ${job.order.displayOrderId}');
+      await UsbPrintLock.exclusive(() async {
+        await UsbSessionRegistry.run(
+          vendorId: config.vendorId!,
+          productId: config.productId!,
+          action: (driver) async {
+            for (int i = 0; i < copies; i++) {
+              await driver.sendBytes(bytes);
+              if (copies > 1 && i < copies - 1) {
+                await Future.delayed(const Duration(milliseconds: 300));
+              }
+            }
+          },
+        );
+      });
+      log('🔓 USB lock release | Order Id - ${job.order.displayOrderId}');
       return;
     }
 
