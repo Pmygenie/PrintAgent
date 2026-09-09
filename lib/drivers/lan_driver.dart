@@ -26,7 +26,11 @@
 //   }
 // }
 
+import 'dart:async';
 import 'dart:io';
+
+import 'package:printer_agent/core/printer/op_timeout.dart';
+
 import 'printer_driver.dart';
 
 class LanPrinterDriver implements PrinterDriver {
@@ -48,12 +52,20 @@ class LanPrinterDriver implements PrinterDriver {
   @override
   Future<void> sendBytes(List<int> bytes) async {
     _socket!.add(bytes);
-    await _socket!.flush();
+    // A printer that accepts the TCP connection and then wedges leaves flush()
+    // waiting forever — connect()'s timeout does not cover this.
+    await bounded(_socket!.flush(), OpTimeout.lanFlush, 'LAN flush to $ipAddress');
   }
 
   @override
   Future<void> disconnect() async {
-    await _socket?.close();
+    final socket = _socket;
     _socket = null;
+    if (socket == null) return;
+    try {
+      await bounded(socket.close(), OpTimeout.lanClose, 'LAN close to $ipAddress');
+    } on TimeoutException {
+      socket.destroy();
+    }
   }
 }

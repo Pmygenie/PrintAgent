@@ -230,7 +230,7 @@ class WindowsSocketService {
     // NEW ORDER / UPDATE ORDER
     // ═══════════════════════════════════════════════════════════════════
     _socket!.off('new_order_$restaurantId');
-    _socket!.on('new_order_$restaurantId', (data) {
+    _socket!.on('new_order_$restaurantId', (data) async {
       log('📡 Received new_order_$restaurantId : $data');
       try {
         final payload = data as List<dynamic>;
@@ -275,16 +275,23 @@ class WindowsSocketService {
 
         // ── Socket auto-bill (new-order only) ─────────────────────────
         // Requires auto-settle + bill flags Yes + BILL printer_agent match.
-        if (eventType == 'new-order') {
-          final agentList = (rawPayload is Map
-              ? rawPayload['printer_agent'] as List<dynamic>? ?? []
-              : []);
+        // Deferred until the KOTs finish so the kitchen ticket prints first;
+        // every early return below still queues it exactly once.
+        final agentList = (rawPayload is Map
+            ? rawPayload['printer_agent'] as List<dynamic>? ?? <dynamic>[]
+            : <dynamic>[]);
+
+        var billQueued = false;
+        void queueBillNow() {
+          if (billQueued || eventType != 'new-order') return;
+          billQueued = true;
           _tryQueueSocketAutoBill(orderMap, order, agentList);
         }
 
         // ── GATE 4: printKot check ────────────────────────────────────
         if (order.printKot != 'Yes') {
           _log('⏩ print_kot=${order.printKot} — skip #${order.displayOrderId}');
+          queueBillNow();
           return;
         }
 
@@ -417,12 +424,9 @@ class WindowsSocketService {
         }
 
         // ── GATE 5: printer_agent array ───────────────────────────────
-        final agentList = ((rawPayload as Map<String, dynamic>)['printer_agent']
-                as List<dynamic>? ??
-            []);
-
         if (agentList.isEmpty) {
           _log('⏩ printer_agent missing — skip #${order.displayOrderId}');
+          queueBillNow();
           return;
         }
 
@@ -438,6 +442,7 @@ class WindowsSocketService {
         if (myAgents.isEmpty) {
           _log(
               '⏩ No agents for empId=$myEmpId — skip #${order.displayOrderId}');
+          queueBillNow();
           return;
         }
 
@@ -451,6 +456,7 @@ class WindowsSocketService {
           if (newlyAdded == null || newlyAdded.isEmpty) {
             _log(
                 '⏩ update-order but no newly_added_items — skip #${order.displayOrderId}');
+            queueBillNow();
             return;
           }
           itemsToPrint = newlyAdded
@@ -462,6 +468,7 @@ class WindowsSocketService {
           final cancelledRaw = rawPayload['cancelled_items'] as List<dynamic>?;
           if (cancelledRaw == null || cancelledRaw.isEmpty) {
             _log('⏩ No cancelled_items — skip #${order.displayOrderId}');
+            queueBillNow();
             return;
           }
           itemsToPrint = cancelledRaw
@@ -474,6 +481,8 @@ class WindowsSocketService {
         }
 
         // ── GATE 7: Per station → router → enqueue ────────────────────
+        final kotJobs = <PrintJob>[];
+
         for (final agent in myAgents) {
           final station = agent['station'].toString().toUpperCase().trim();
 
@@ -513,13 +522,13 @@ class WindowsSocketService {
               ? PrintType.cancelKot
               : PrintType.kot;
 
-          KotSeparateTicket.queue(
+          kotJobs.addAll(KotSeparateTicket.queue(
             queueManager: _queueManager,
             printerIds: printerIds,
             type: jobType,
             order: stationOrder,
             stationLabel: station,
-          );
+          ));
 
           final label = jobType == PrintType.cancelKot
               ? '🚫 Queued CANCEL KOT'
@@ -527,6 +536,14 @@ class WindowsSocketService {
           _log(
               '$label [$station] → ${printerIds.join(', ')} (${stationItems.length} items) #${order.displayOrderId}');
         }
+
+        // ── Bill after KOTs reach a terminal state ────────────────────
+        if (kotJobs.isNotEmpty) {
+          _log(
+              '⏳ Waiting for ${kotJobs.length} KOT job(s) before bill #${order.displayOrderId}');
+          await Future.wait(kotJobs.map((j) => j.completed));
+        }
+        queueBillNow();
       } catch (e) {
         _log('❌ new_order parse error: $e');
       }

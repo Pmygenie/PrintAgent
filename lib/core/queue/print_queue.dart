@@ -18,7 +18,10 @@ class PrintQueue {
   PrintQueue(this._manager);
 
   void addJob(PrintJob job) {
-    if (_disposed) return;
+    if (_disposed) {
+      job.markSettled();
+      return;
+    }
     _queue.add(job);
     _emit('=====> QUEUED | ${job.id} | Order Id -${job.order.displayOrderId}');
     _processNext();
@@ -36,6 +39,7 @@ class PrintQueue {
       job.status = PrintJobStatus.done;
       _queue.removeFirst();
       _emit('=====> DONE | ${job.id} | Order Id - ${job.order.displayOrderId}');
+      job.markSettled();
     } catch (e, stackTrace) {
       // ← add stackTrace
       // ✅ NOW we can see the real error
@@ -52,6 +56,7 @@ class PrintQueue {
         job.status = PrintJobStatus.failed;
         _queue.removeFirst();
         _emit('=====> FAILED | ${job.id} | Order Id - ${job.order.displayOrderId}');
+        job.markSettled();
       }
     } finally {
       _isProcessing = false;
@@ -68,6 +73,11 @@ class PrintQueue {
 
   void dispose() {
     _disposed = true;
+    // Pending jobs will never run — release anyone waiting on them.
+    for (final job in _queue) {
+      job.markSettled();
+    }
+    _queue.clear();
     if (!_statusController.isClosed) {
       _statusController.close();
     }

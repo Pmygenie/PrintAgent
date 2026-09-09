@@ -69,6 +69,7 @@ class PrintQueueManager {
     final queue = _queues[job.printerId];
     if (queue == null) {
       print('[QueueManager] ❌ No queue for printerId="${job.printerId}" — job dropped');
+      job.markSettled();
       return;
     }
     queue.addJob(job);

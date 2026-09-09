@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_thermal_printer_windows/flutter_thermal_printer_windows.dart';
 import 'package:printer_agent/core/printer/bluetooth_address.dart';
+import 'package:printer_agent/core/printer/op_timeout.dart';
 
 import 'escpos_bluetooth_send.dart';
 import 'printer_driver.dart';
@@ -26,7 +27,11 @@ class WindowsBluetoothDriver implements PrinterDriver {
 
   @override
   Future<void> connect() async {
-    BluetoothPrinter? target = _match(await _api.getPairedPrinters());
+    BluetoothPrinter? target = _match(await bounded(
+      _api.getPairedPrinters(),
+      OpTimeout.sppDiscover,
+      'SPP paired-printer lookup',
+    ));
 
     if (target == null) {
       final scanned = await _api.scanForPrinters(
@@ -40,9 +45,17 @@ class WindowsBluetoothDriver implements PrinterDriver {
     }
 
     if (!target.isPaired) {
-      await _api.pairPrinter(target);
+      await bounded(
+        _api.pairPrinter(target),
+        OpTimeout.sppPair,
+        'SPP pair $macAddress',
+      );
     }
-    await _api.connect(target);
+    await bounded(
+      _api.connect(target),
+      OpTimeout.sppConnect,
+      'SPP connect $macAddress',
+    );
     _printer = target;
     print('✅ Windows SPP connected: $macAddress');
   }
@@ -64,6 +77,7 @@ class WindowsBluetoothDriver implements PrinterDriver {
       maxChunk: 512,
       chunkDelay: const Duration(milliseconds: 60),
       settleDelay: const Duration(milliseconds: 2000),
+      writeTimeout: OpTimeout.sppWrite,
       write: (chunk) => _api.printRawBytes(
         printer,
         Uint8List.fromList(chunk),
@@ -73,9 +87,13 @@ class WindowsBluetoothDriver implements PrinterDriver {
 
   @override
   Future<void> disconnect() async {
-    if (_printer != null) {
-      await _api.disconnect(_printer!);
-      _printer = null;
-    }
+    final printer = _printer;
+    _printer = null;
+    if (printer == null) return;
+    await bounded(
+      _api.disconnect(printer),
+      OpTimeout.sppDisconnect,
+      'SPP disconnect $macAddress',
+    );
   }
 }

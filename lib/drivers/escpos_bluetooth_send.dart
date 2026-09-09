@@ -6,6 +6,10 @@
 /// - never splits `GS v 0` or `ESC *` image blocks
 /// - avoids ending a text chunk on a lone `ESC`/`GS`
 /// - paces writes and settles after the last chunk
+library;
+
+import 'package:printer_agent/core/printer/op_timeout.dart';
+
 class EscPosBluetoothTransport {
   EscPosBluetoothTransport._();
 
@@ -128,12 +132,15 @@ class EscPosBluetoothTransport {
   }
 
   /// Send [bytes] using [write], with reset + safe chunking + pacing.
+  /// [writeTimeout] bounds a single chunk write, not the whole payload, so a
+  /// long paced print is unaffected. Null leaves the write unbounded.
   static Future<void> send({
     required List<int> bytes,
     required Future<void> Function(List<int> chunk) write,
     int maxChunk = 64,
     Duration chunkDelay = const Duration(milliseconds: 40),
     Duration settleDelay = const Duration(milliseconds: 1500),
+    Duration? writeTimeout,
   }) async {
     if (bytes.isEmpty) return;
 
@@ -144,7 +151,10 @@ class EscPosBluetoothTransport {
       print(
         '➡️ Sending chunk ${i + 1}/${chunks.length} (${chunks[i].length} bytes)',
       );
-      await write(chunks[i]);
+      final pending = write(chunks[i]);
+      await (writeTimeout == null
+          ? pending
+          : bounded(pending, writeTimeout, 'chunk ${i + 1}/${chunks.length}'));
       print('✅ Chunk ${i + 1} sent');
       if (i < chunks.length - 1 && chunkDelay > Duration.zero) {
         await Future.delayed(chunkDelay);

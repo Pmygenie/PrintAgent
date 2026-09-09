@@ -10,39 +10,46 @@ import 'package:printer_agent/core/queue/print_queue_manager.dart';
 class KotSeparateTicket {
   KotSeparateTicket._();
 
-  static void queue({
+  /// Returns the jobs that were queued, so callers can await their completion.
+  static List<PrintJob> queue({
     required PrintQueueManager queueManager,
     required List<String> printerIds,
     required PrintType type,
     required RestaurantOrder order,
     String? stationLabel,
   }) {
-    if (printerIds.isEmpty) return;
+    final queued = <PrintJob>[];
+    if (printerIds.isEmpty) return queued;
 
     if (type != PrintType.kot || !PrintConfig.kotSeparateTicket) {
       for (final printerId in printerIds) {
-        queueManager.route(PrintJob(
+        final job = PrintJob(
           type: type,
           printerId: printerId,
           order: order,
           stationLabel: stationLabel,
-        ));
+        );
+        queued.add(job);
+        queueManager.route(job);
       }
-      return;
+      return queued;
     }
 
     for (final item in order.items) {
       if (item.foodStatus == 3) continue;
       final ticket = _orderWithItem(order, item);
       for (final printerId in printerIds) {
-        queueManager.route(PrintJob(
+        final job = PrintJob(
           type: type,
           printerId: printerId,
           order: ticket,
           stationLabel: stationLabel,
-        ));
+        );
+        queued.add(job);
+        queueManager.route(job);
       }
     }
+    return queued;
   }
 
   static RestaurantOrder _orderWithItem(RestaurantOrder order, OrderItem item) {

@@ -13,6 +13,7 @@ import 'bitmap/bitmap_print_config.dart';
 import 'ble_session_registry.dart';
 import 'bluetooth_print_lock.dart';
 import 'escpos_formatter.dart';
+import 'op_timeout.dart';
 import 'usb_print_lock.dart';
 import 'usb_session_registry.dart';
 import '../../drivers/printer_driver.dart';
@@ -42,7 +43,11 @@ class PrinterManager {
     if (shouldUseWindowsPdf) {
       final pdfBytes = await PdfFormatter.format(job);
 
-      final printers = await Printing.listPrinters();
+      final printers = await bounded(
+        Printing.listPrinters(),
+        OpTimeout.windowsListPrinters,
+        'Windows printer enumeration',
+      );
 
       final targetName = (config.windowsPrinterName ?? '').trim().toLowerCase();
 
@@ -61,10 +66,14 @@ class PrinterManager {
       }
 
       for (int i = 0; i < copies; i++) {
-        final result = await Printing.directPrintPdf(
-          printer: targetPrinter,
-          onLayout: (PdfPageFormat format) async => pdfBytes,
-          name: 'BILL_${job.order.displayOrderId}_COPY_${i + 1}',
+        final result = await bounded(
+          Future.value(Printing.directPrintPdf(
+            printer: targetPrinter,
+            onLayout: (PdfPageFormat format) async => pdfBytes,
+            name: 'BILL_${job.order.displayOrderId}_COPY_${i + 1}',
+          )),
+          OpTimeout.windowsDirectPrint,
+          'Windows spool of BILL_${job.order.displayOrderId} copy ${i + 1}',
         );
 
         log('PDF DIRECT PRINT RESULT (Copy ${i + 1}) => $result');
