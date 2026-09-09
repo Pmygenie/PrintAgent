@@ -45,6 +45,18 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
 
+        </activity>
+
+        <!-- Claims the USB attach intent so Android grants persistent printer
+             permission, without bringing MainActivity to the foreground. -->
+        <activity
+            android:name=".UsbAttachActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay">
+
             <intent-filter>
                 <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"/>
             </intent-filter>

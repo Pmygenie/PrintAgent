@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <usb-device />  <!-- allow ALL USB devices -->
+    <!-- Any USB device: the printer's vendor/product ids are configurable per
+         deployment. Matching broadly only wakes UsbAttachActivity, which shows
+         nothing and finishes immediately. -->
+    <usb-device />
 </resources>

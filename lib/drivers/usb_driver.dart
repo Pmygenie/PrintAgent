@@ -40,6 +40,7 @@ class UsbPrinterDriver implements PrinterDriver {
 
     final seen = <String>[];
     var attached = false;
+    var hasPermission = false;
 
     if (devices is List) {
       for (final raw in devices) {
@@ -51,6 +52,7 @@ class UsbPrinterDriver implements PrinterDriver {
         );
         if (vid == vendorId && (productId == 0 || pid == productId)) {
           attached = true;
+          hasPermission = raw['connected'] == true;
         }
       }
     }
@@ -62,6 +64,16 @@ class UsbPrinterDriver implements PrinterDriver {
       }
       throw Exception(
         '❌ USB printer not found (vendor:$vendorId product:$productId)',
+      );
+    }
+
+    // Native printText() would call requestPermission() here, and its
+    // PendingIntent is an Activity — that pulls the app to the foreground over
+    // whatever the user is doing, and prints nothing anyway (the permission
+    // request is async). Fail the job instead and let Diagnostics grant it.
+    if (!hasPermission) {
+      throw Exception(
+        '❌ USB permission missing. Please grant permission from Diagnostics.',
       );
     }
 
