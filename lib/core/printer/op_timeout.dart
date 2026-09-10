@@ -25,6 +25,14 @@ class OpTimeout {
   /// One paced chunk (512 bytes) — normally tens of milliseconds.
   static const sppWrite = Duration(seconds: 10);
 
+  /// One BLE characteristic write. Passed to universal_ble's own `timeout`,
+  /// which fails the queued command instead of abandoning an uncancellable
+  /// future — so no stale write can land after we give up.
+  static const bleWrite = Duration(seconds: 10);
+
+  /// Service discovery on a freshly connected GATT link.
+  static const bleDiscover = Duration(seconds: 20);
+
   // Windows PDF spooling.
   static const windowsListPrinters = Duration(seconds: 10);
   static const windowsDirectPrint = Duration(seconds: 60);

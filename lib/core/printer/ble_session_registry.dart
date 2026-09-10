@@ -49,7 +49,7 @@ class BleSessionRegistry {
     }
 
     var driver = _sessions[key];
-    if (driver != null && driver.isConnected) {
+    if (driver != null && await driver.isConnected) {
       print('[BT] SESSION HIT $label → reusing connection');
       try {
         await action(driver);
