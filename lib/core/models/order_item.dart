@@ -33,6 +33,28 @@ class OrderItem {
     this.createdAt,
   });
 
+  bool get isComplementary =>
+      complementary?.toString().toLowerCase() == 'yes';
+
+  String get billDisplayName =>
+      isComplementary ? '$name (Comp)' : name;
+
+  double get billEffectivePrice =>
+      (itemUnit.isNotEmpty && itemUnitPrice > 0) ? itemUnitPrice : price;
+
+  /// PRICE column: base + variation when variations exist. Complementary is 0.
+  double get billPriceColumn {
+    if (isComplementary) return 0;
+    final effective = billEffectivePrice;
+    return variations.isNotEmpty ? effective + variationTotal : effective;
+  }
+
+  /// AMT column: (base + variation + addon) × qty. Complementary is 0.
+  double get billLineAmount {
+    if (isComplementary) return 0;
+    return (billEffectivePrice + variationTotal + addonTotal) * quantity;
+  }
+
   OrderItem copyWith({double? quantity}) {
     return OrderItem(
       foodId: foodId,
@@ -76,6 +98,38 @@ class OrderItem {
     }
 
     return order.map((key) => merged[key]!).toList();
+  }
+
+  /// Associated room-order lines often have top-level `name` instead of
+  /// `food_details`. Reuses [fromJson] after filling those gaps.
+  factory OrderItem.fromAssociatedJson(Map<String, dynamic> detail) {
+    final food = Map<String, dynamic>.from(detail['food_details'] ?? {});
+    final topName = detail['name']?.toString().trim() ?? '';
+    final foodName = food['name']?.toString().trim() ?? '';
+    final name = topName.isNotEmpty ? topName : foodName;
+
+    final patched = Map<String, dynamic>.from(detail);
+    patched['food_details'] = {
+      ...food,
+      if (name.isNotEmpty) 'name': name,
+      'price': food['price'] ?? detail['price'] ?? detail['unit_price'] ?? 0,
+    };
+    return OrderItem.fromJson(patched);
+  }
+
+  static List<OrderItem> fromAssociatedOrderDetails(dynamic raw) {
+    if (raw is! List) return const [];
+    return mergedForBill([
+      for (final entry in raw)
+        if (entry is Map)
+          OrderItem.fromAssociatedJson(Map<String, dynamic>.from(entry)),
+    ]);
+  }
+
+  static String associatedOrderDate(dynamic raw) {
+    final text = raw?.toString().trim() ?? '';
+    if (text.isEmpty) return '';
+    return text.split(RegExp(r'\s+')).first;
   }
 
   static String _billMergeKey(OrderItem item) {

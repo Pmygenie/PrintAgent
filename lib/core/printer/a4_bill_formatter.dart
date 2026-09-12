@@ -87,7 +87,7 @@ class A4BillFormatter {
     children.add(_amountsAndTotal(bill, profile, isRoom: isRoom));
 
     if (isRoom) {
-      children.add(_roomSection(bill));
+      children.add(await _roomSection(bill, profile));
     }
 
     if (bill['order_type']?.toString() == 'delivery' && !isAggregator) {
@@ -259,7 +259,10 @@ class A4BillFormatter {
 
   // ── Items ───────────────────────────────────────────────────────────
 
-  static Future<pw.Widget> _itemTable(RestaurantOrder o) async {
+  static Future<pw.Widget> _itemTable(RestaurantOrder o) =>
+      _itemTableFromItems(OrderItem.mergedForBill(o.items));
+
+  static Future<pw.Widget> _itemTableFromItems(List<OrderItem> items) async {
     final headerStyle = _text(_style.billTableHeader);
     final contentStyle = _text(_style.billTableContent);
     final qtyStyle = _text(_style.billTableQty);
@@ -282,22 +285,12 @@ class A4BillFormatter {
     ];
 
     var sr = 1;
-    for (final item in OrderItem.mergedForBill(o.items)) {
+    for (final item in items) {
       if (item.foodStatus == 3) continue;
 
-      final isComp = item.complementary?.toString().toLowerCase() == 'yes';
-      final effectivePrice =
-          (item.itemUnit.isNotEmpty && item.itemUnitPrice > 0)
-              ? item.itemUnitPrice
-              : item.price;
-      final displayUnitPrice = item.variations.isNotEmpty
-          ? effectivePrice + item.variationTotal
-          : effectivePrice;
-      final basePrice = isComp ? 0.0 : displayUnitPrice;
-      final unitTotalPrice =
-          effectivePrice + item.variationTotal + item.addonTotal;
-      final amt = isComp ? 0.0 : unitTotalPrice * item.quantity;
-      final displayName = isComp ? '${item.name} (Comp)' : item.name;
+      final basePrice = item.billPriceColumn;
+      final amt = item.billLineAmount;
+      final displayName = item.billDisplayName;
 
       final isGramUnit798 = PrintConfig.restaurantId == 798 &&
           item.itemUnit.trim().toLowerCase() == 'gm';
@@ -537,7 +530,7 @@ class A4BillFormatter {
           ),
         if (gstRows.isNotEmpty) ...[
           pw.SizedBox(height: 4),
-          pw.Text('GST Detail', style: _text(_style.billAmountLine)),
+          pw.Text('-- GST Detail --', style: _text(_style.billAmountLine)),
           for (final row in gstRows)
             pw.Row(
               children: [
@@ -649,7 +642,10 @@ class A4BillFormatter {
     );
   }
 
-  static pw.Widget _roomSection(Map<String, dynamic> bill) {
+  static Future<pw.Widget> _roomSection(
+    Map<String, dynamic> bill,
+    RestaurantProfileModel profile,
+  ) async {
     final associated = bill['associated_orders'];
     final associatedList = associated is List ? associated : const [];
     final style = _text(_style.roomContent);
@@ -661,14 +657,25 @@ class A4BillFormatter {
     final grantAmount = ReceiptBusinessLogic.billAmount(bill, 'grant_amount');
     final pay = _payLabel(bill);
 
-    final rows = <pw.TableRow>[
-      pw.TableRow(
+    final children = <pw.Widget>[
+      pw.Table(
+        border: _border,
+        columnWidths: const {
+          0: pw.FlexColumnWidth(1),
+        },
         children: [
-          pw.Padding(
-            padding: _cellPad,
-            child: pw.Text('-- Previous Room Bill --', style: header),
+          pw.TableRow(
+            children: [
+              pw.Padding(
+                padding: _cellPad,
+                child: pw.Text(
+                  '-- Previous Room Bills --',
+                  style: header,
+                  textAlign: pw.TextAlign.center,
+                ),
+              ),
+            ],
           ),
-          pw.Padding(padding: _cellPad, child: pw.SizedBox()),
         ],
       ),
     ];
@@ -676,59 +683,180 @@ class A4BillFormatter {
     for (final raw in associatedList) {
       if (raw is! Map) continue;
       final assoc = Map<String, dynamic>.from(raw);
-      final amt =
-          double.tryParse(assoc['order_amount']?.toString() ?? '0') ?? 0.0;
-      rows.add(
-        pw.TableRow(
+      final aId = assoc['restaurant_order_id']?.toString() ?? '';
+      final date = OrderItem.associatedOrderDate(assoc['order_date']);
+      final priceDetail = assoc['priceDetail'] is Map
+          ? Map<String, dynamic>.from(assoc['priceDetail'] as Map)
+          : <String, dynamic>{};
+      final headerAmt = double.tryParse(
+            (priceDetail['payment_amount'] ??
+                    priceDetail['grant_amount'] ??
+                    assoc['order_amount'])
+                ?.toString() ??
+                '0',
+          ) ??
+          0.0;
+
+      children.add(
+        pw.Table(
+          border: _border,
+          columnWidths: const {
+            0: pw.FlexColumnWidth(1),
+            1: pw.FlexColumnWidth(1),
+            2: pw.FlexColumnWidth(1),
+          },
           children: [
-            pw.Padding(
-              padding: _cellPad,
-              child: pw.Text(
-                'Order ID #${assoc['restaurant_order_id'] ?? ''}',
-                style: style,
-              ),
-            ),
-            pw.Padding(
-              padding: _cellPad,
-              child: pw.Text(
-                amt.toStringAsFixed(2),
-                style: style,
-                textAlign: pw.TextAlign.right,
-              ),
+            pw.TableRow(
+              children: [
+                pw.Padding(
+                  padding: _cellPad,
+                  child: pw.Text('#$aId', style: style),
+                ),
+                pw.Padding(
+                  padding: _cellPad,
+                  child: pw.Text(
+                    date,
+                    style: style,
+                    textAlign: pw.TextAlign.center,
+                  ),
+                ),
+                pw.Padding(
+                  padding: _cellPad,
+                  child: pw.Text(
+                    headerAmt.toStringAsFixed(2),
+                    style: style,
+                    textAlign: pw.TextAlign.right,
+                  ),
+                ),
+              ],
             ),
           ],
         ),
       );
+
+      final items =
+          OrderItem.fromAssociatedOrderDetails(assoc['orderDetails']);
+      if (items.isNotEmpty) {
+        children.add(await _itemTableFromItems(items));
+      }
+
+      if (priceDetail.isNotEmpty) {
+        children.add(
+          _associatedAmountsTable(
+            priceDetail,
+            serviceChargeLabel: profile.serviceChargeLabel,
+          ),
+        );
+      }
     }
 
-    rows.add(
-      pw.TableRow(
+    children.add(
+      pw.Table(
+        border: _border,
+        columnWidths: const {
+          0: pw.FlexColumnWidth(6),
+          1: pw.FlexColumnWidth(4),
+        },
         children: [
-          pw.Padding(
-            padding: _cellPad,
-            child: pw.Text(
-              'In Words : ${AmountInWords.rupees(paymentAmount)}',
-              style: amountStyle,
-            ),
-          ),
-          pw.Padding(
-            padding: _cellPad,
-            child: pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-              children: [
-                _kvRow(
-                  'GRAND TOTAL',
-                  'Rs.${grantAmount.toStringAsFixed(0)}',
-                  grandStyle,
+          pw.TableRow(
+            children: [
+              pw.Padding(
+                padding: _cellPad,
+                child: pw.Text(
+                  'In Words : ${AmountInWords.rupees(paymentAmount)}',
+                  style: amountStyle,
                 ),
-                if (pay.isNotEmpty)
-                  pw.Text(pay, style: _text(_style.billPaidBy)),
-              ],
-            ),
+              ),
+              pw.Padding(
+                padding: _cellPad,
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                  children: [
+                    _kvRow(
+                      'GRAND TOTAL',
+                      'Rs.${grantAmount.toStringAsFixed(0)}',
+                      grandStyle,
+                    ),
+                    if (pay.isNotEmpty)
+                      pw.Text(pay, style: _text(_style.billPaidBy)),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
+
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: children,
+    );
+  }
+
+  static pw.Widget _associatedAmountsTable(
+    Map<String, dynamic> amounts, {
+    required String serviceChargeLabel,
+  }) {
+    double d(String key) =>
+        double.tryParse(amounts[key]?.toString() ?? '0') ?? 0.0;
+    final amountStyle = _text(_style.billAmountLine);
+    final lines = <_AmountLine>[
+      _AmountLine('Item Total', d('order_item_total').toStringAsFixed(2)),
+    ];
+    final serviceCharge = d('service_charge_amount');
+    if (serviceCharge > 0) {
+      lines.add(_AmountLine(
+          serviceChargeLabel, serviceCharge.toStringAsFixed(2)));
+    }
+    final deliveryCharge = d('delivery_charge');
+    if (deliveryCharge > 0) {
+      lines.add(
+          _AmountLine('Delivery Charge', deliveryCharge.toStringAsFixed(2)));
+    }
+    final discountAmount = d('discount_amount');
+    if (discountAmount > 0) {
+      lines.add(_AmountLine('Discount', discountAmount.toString()));
+    }
+    final packingCharge = d('packing_charge');
+    if (packingCharge > 0) {
+      lines.add(
+          _AmountLine('Packing Charge', packingCharge.toStringAsFixed(2)));
+    }
+    final couponCode = amounts['coupon_code']?.toString() ?? '';
+    if (couponCode.isNotEmpty) {
+      lines.add(_AmountLine('Coupon Code', couponCode));
+    }
+    final loyaltyAmount = d('loyalty_discount_amount');
+    if (loyaltyAmount > 0) {
+      lines.add(_AmountLine('Loyalty', loyaltyAmount.toString()));
+    }
+    final walletAmount = d('wallet_used_amount');
+    if (walletAmount > 0) {
+      lines.add(_AmountLine('Wallet', walletAmount.toString()));
+    }
+    final tip = d('tip_amount');
+    if (tip > 0) {
+      lines.add(_AmountLine('Tip', tip.toStringAsFixed(2)));
+    }
+    lines.add(
+        _AmountLine('Sub Total', d('order_subtotal').toStringAsFixed(2)));
+    final gstTax = d('gst_tax');
+    if (gstTax > 0) {
+      lines.add(_AmountLine('CGST', (gstTax / 2).toStringAsFixed(2)));
+      lines.add(_AmountLine('SGST', (gstTax / 2).toStringAsFixed(2)));
+    }
+    final vatTax = d('vat_tax');
+    if (vatTax > 0) {
+      lines.add(_AmountLine('VAT', vatTax.toStringAsFixed(2)));
+    }
+    final orderTotal = double.tryParse(
+          (amounts['payment_amount'] ?? amounts['grant_amount'])
+                  ?.toString() ??
+              '0',
+        ) ??
+        0.0;
+    lines.add(_AmountLine('Order Total', ReceiptBusinessLogic.formatMoney(orderTotal)));
 
     return pw.Table(
       border: _border,
@@ -736,7 +864,30 @@ class A4BillFormatter {
         0: pw.FlexColumnWidth(6),
         1: pw.FlexColumnWidth(4),
       },
-      children: rows,
+      children: [
+        pw.TableRow(
+          children: [
+            pw.SizedBox(),
+            pw.Padding(
+              padding: _cellPad,
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                children: [
+                  for (final line in lines)
+                    pw.Row(
+                      children: [
+                        pw.Expanded(
+                          child: pw.Text(line.label, style: amountStyle),
+                        ),
+                        pw.Text(line.value, style: amountStyle),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 

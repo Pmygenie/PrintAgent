@@ -235,7 +235,7 @@ class BillRenderer {
     if (stationGstRows.isNotEmpty) {
       canvas.drawRule(solid);
       canvas.drawText(
-        'GST Detail',
+        '-- GST Detail --',
         canvas.styleFor(style.billAmountLine).copyWith(fontWeight: FontWeight.bold),
         align: TextAlign.center,
       );
@@ -329,25 +329,55 @@ class BillRenderer {
       final associatedOrders = bill['associated_orders'] as List<dynamic>?;
       canvas.drawRule(solid);
       canvas.drawText(
-        '-- Previous Room Bill --',
+        '-- Previous Room Bills --',
         canvas.styleFor(style.roomHeader),
         align: TextAlign.center,
       );
       canvas.drawRule(solid);
 
       for (final assoc in associatedOrders ?? []) {
-        final aMap = assoc as Map<String, dynamic>;
+        if (assoc is! Map) continue;
+        final aMap = Map<String, dynamic>.from(assoc);
         final aId = aMap['restaurant_order_id']?.toString() ?? '';
-        final aAmt =
-            double.tryParse(aMap['order_amount']?.toString() ?? '0') ?? 0.0;
-        canvas.drawLeftRight(
-          'Order ID #$aId',
-          aAmt.toStringAsFixed(2),
+        final date = OrderItem.associatedOrderDate(aMap['order_date']);
+        final priceDetail = aMap['priceDetail'] is Map
+            ? Map<String, dynamic>.from(aMap['priceDetail'] as Map)
+            : <String, dynamic>{};
+        final headerAmt = double.tryParse(
+              (priceDetail['payment_amount'] ??
+                      priceDetail['grant_amount'] ??
+                      aMap['order_amount'])
+                  ?.toString() ??
+                  '0',
+            ) ??
+            0.0;
+
+        canvas.drawThreeColRow(
+          '#$aId',
+          date,
+          headerAmt.toStringAsFixed(2),
           canvas.styleFor(style.roomContent),
         );
+
+        final items =
+            OrderItem.fromAssociatedOrderDetails(aMap['orderDetails']);
+        if (items.isNotEmpty) {
+          _drawAssociatedItems(canvas, style, items);
+        }
+
+        if (priceDetail.isNotEmpty) {
+          canvas.drawRule(solid);
+          _drawPriceDetailAmounts(
+            canvas,
+            style,
+            priceDetail,
+            serviceChargeLabel: profile.serviceChargeLabel,
+          );
+        }
+
+        canvas.drawRule(solid);
       }
 
-      canvas.drawRule(solid);
       canvas.drawLeftRight(
         'GRAND TOTAL ${ReceiptBusinessLogic.payLabel(bill)}',
         'Rs.${grantAmount.toStringAsFixed(0)}',
@@ -363,6 +393,145 @@ class BillRenderer {
     );
 
     return canvas;
+  }
+
+  static void _drawAssociatedItems(
+    ReceiptCanvas canvas,
+    PrintStyleConfig style,
+    List<OrderItem> items,
+  ) {
+    final showDate = ReceiptBusinessLogic.showBillItemDate;
+    final cw = canvas.contentWidthPx;
+    final amtW = cw * (showDate ? 0.16 : 0.18);
+    final priceW = cw * (showDate ? 0.16 : 0.18);
+    final qtyW = cw * (showDate ? 0.12 : 0.14);
+    final dateW = showDate ? cw * 0.12 : 0.0;
+    final itemW = cw - qtyW - priceW - amtW - dateW;
+    final headerStyle = canvas.styleFor(style.billTableHeader);
+    final rowStyle = canvas.styleFor(style.billTableContent);
+    final metaStyle = canvas.styleFor(style.billTableMeta);
+
+    canvas.drawTableRow([
+      ReceiptTableCell('ITEM', itemW),
+      ReceiptTableCell('QTY', qtyW, align: TextAlign.center),
+      ReceiptTableCell(
+        PrintConfig.restaurantId == 798 ? 'PRICE/KG' : 'PRICE',
+        priceW,
+        align: TextAlign.center,
+      ),
+      ReceiptTableCell('AMT', amtW, align: TextAlign.right),
+      if (showDate) ReceiptTableCell('DATE', dateW, align: TextAlign.right),
+    ], headerStyle);
+
+    for (final item in items) {
+      if (item.foodStatus == 3) continue;
+      final basePrice = item.billPriceColumn;
+      final isGramUnit798 = PrintConfig.restaurantId == 798 &&
+          item.itemUnit.trim().toLowerCase() == 'gm';
+      final priceDisplay = isGramUnit798
+          ? ReceiptBusinessLogic.formatMoney(basePrice * 1000)
+          : ReceiptBusinessLogic.formatMoney(basePrice);
+      final dateStr =
+          showDate ? ReceiptBusinessLogic.itemDate(item.createdAt) : '';
+
+      canvas.drawTableRow([
+        ReceiptTableCell(item.billDisplayName, itemW),
+        ReceiptTableCell(
+          ReceiptBusinessLogic.qtyDisplay(item),
+          qtyW,
+          align: TextAlign.center,
+        ),
+        ReceiptTableCell(priceDisplay, priceW, align: TextAlign.center),
+        ReceiptTableCell(
+          ReceiptBusinessLogic.formatMoney(item.billLineAmount),
+          amtW,
+          align: TextAlign.right,
+        ),
+        if (showDate)
+          ReceiptTableCell(dateStr, dateW, align: TextAlign.right),
+      ], rowStyle);
+
+      for (final variation in item.variations) {
+        canvas.drawText('  - $variation', metaStyle);
+      }
+      for (final addon in item.addons) {
+        canvas.drawText('  + $addon', metaStyle);
+      }
+    }
+  }
+
+  static void _drawPriceDetailAmounts(
+    ReceiptCanvas canvas,
+    PrintStyleConfig style,
+    Map<String, dynamic> amounts, {
+    required String serviceChargeLabel,
+  }) {
+    double d(String key) =>
+        double.tryParse(amounts[key]?.toString() ?? '0') ?? 0.0;
+    final amountStyle = canvas.styleFor(style.billAmountLine);
+
+    canvas.drawLabelValue(
+        'Item Total', d('order_item_total').toStringAsFixed(2), amountStyle);
+    final serviceCharge = d('service_charge_amount');
+    if (serviceCharge > 0) {
+      canvas.drawLabelValue(
+          serviceChargeLabel, serviceCharge.toStringAsFixed(2), amountStyle);
+    }
+    final deliveryCharge = d('delivery_charge');
+    if (deliveryCharge > 0) {
+      canvas.drawLabelValue(
+          'Delivery Charge', deliveryCharge.toStringAsFixed(2), amountStyle);
+    }
+    final discountAmount = d('discount_amount');
+    if (discountAmount > 0) {
+      canvas.drawLabelValue(
+          'Discount', discountAmount.toString(), amountStyle);
+    }
+    final packingCharge = d('packing_charge');
+    if (packingCharge > 0) {
+      canvas.drawLabelValue(
+          'Packing Charge', packingCharge.toStringAsFixed(2), amountStyle);
+    }
+    final couponCode = amounts['coupon_code']?.toString() ?? '';
+    if (couponCode.isNotEmpty) {
+      canvas.drawLabelValue('Coupon Code', couponCode, amountStyle);
+    }
+    final loyaltyAmount = d('loyalty_discount_amount');
+    if (loyaltyAmount > 0) {
+      canvas.drawLabelValue('Loyalty', loyaltyAmount.toString(), amountStyle);
+    }
+    final walletAmount = d('wallet_used_amount');
+    if (walletAmount > 0) {
+      canvas.drawLabelValue('Wallet', walletAmount.toString(), amountStyle);
+    }
+    final tip = d('tip_amount');
+    if (tip > 0) {
+      canvas.drawLabelValue('Tip', tip.toStringAsFixed(2), amountStyle);
+    }
+    canvas.drawLabelValue(
+        'Sub Total', d('order_subtotal').toStringAsFixed(2), amountStyle);
+    final gstTax = d('gst_tax');
+    if (gstTax > 0) {
+      canvas.drawLabelValue(
+          'CGST', (gstTax / 2).toStringAsFixed(2), amountStyle);
+      canvas.drawLabelValue(
+          'SGST', (gstTax / 2).toStringAsFixed(2), amountStyle);
+    }
+    final vatTax = d('vat_tax');
+    if (vatTax > 0) {
+      canvas.drawLabelValue('VAT', vatTax.toStringAsFixed(2), amountStyle);
+    }
+    final orderTotal = double.tryParse(
+          (amounts['payment_amount'] ?? amounts['grant_amount'])
+                  ?.toString() ??
+              '0',
+        ) ??
+        0.0;
+    canvas.drawLabelValue(
+      'Order Total',
+      ReceiptBusinessLogic.formatMoney(orderTotal),
+      amountStyle,
+    );
   }
 
   static void _drawLabelBlock(

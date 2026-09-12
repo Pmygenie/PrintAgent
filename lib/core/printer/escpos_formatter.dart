@@ -559,6 +559,184 @@ class EscPosFormatter {
     return inner.padLeft(_width);
   }
 
+  static String _assocHeaderLine(String id, String date, String amount) {
+    final left = '#$id';
+    if (date.isEmpty) return _alignLR(left, amount);
+    var dateStart = ((_width - date.length) / 2).floor();
+    final minStart = left.length + 1;
+    final maxStart = _width - amount.length - 1 - date.length;
+    if (maxStart < minStart) return _alignLR('$left $date', amount);
+    if (dateStart < minStart) dateStart = minStart;
+    if (dateStart > maxStart) dateStart = maxStart;
+    final leftGap = dateStart - left.length;
+    final rightGap = _width - dateStart - date.length - amount.length;
+    return '$left${' ' * leftGap}$date${' ' * rightGap}$amount';
+  }
+
+  static Future<List<int>> _escAssociatedItemTable(
+    Generator g,
+    List<OrderItem> items,
+  ) async {
+    List<int> b = [];
+    final bool show80mmDate =
+        PrintConfig.is80mm && PrintConfig.showItemDateOn80mm;
+    final int amtWidth = PrintConfig.is80mm ? 8 : 7;
+    final int priceWidth = PrintConfig.is80mm ? 8 : 7;
+    final int qtyWidth = PrintConfig.is80mm ? 6 : 5;
+    final int dateWidth = show80mmDate ? 6 : 0;
+    final int itemWidth =
+        _width - qtyWidth - priceWidth - amtWidth - dateWidth;
+
+    b += await _escPrintLine(
+      g,
+      _padR('ITEM', itemWidth) +
+          _padC('QTY', qtyWidth) +
+          _padC('PRICE', priceWidth) +
+          _padL('AMT', amtWidth) +
+          (show80mmDate ? _padL('DATE', dateWidth) : ''),
+      styles: _escStyle(_style.billTableHeader, align: PosAlign.center),
+    );
+
+    for (final item in items) {
+      if (item.foodStatus == 3) continue;
+
+      final basePrice = item.billPriceColumn;
+      final amt = item.billLineAmount;
+      final isGramUnit798 = PrintConfig.restaurantId == 798 &&
+          item.itemUnit.trim().toLowerCase() == 'gm';
+      final priceDisplay = isGramUnit798
+          ? _formatMoney(basePrice * 1000)
+          : _formatMoney(basePrice);
+      final qtyDisplay = item.itemUnit.isNotEmpty
+          ? '${_formatQty(item.quantity)}${item.itemUnit}'
+          : _formatQty(item.quantity);
+      final itemNameLines = _wrapItemName(item.billDisplayName, itemWidth);
+      final dateStr = show80mmDate ? _escItemDate(item.createdAt) : '';
+
+      b += await _escPrintLine(
+        g,
+        _padR(itemNameLines.first, itemWidth) +
+            _padC(qtyDisplay, qtyWidth) +
+            _padC(priceDisplay, priceWidth) +
+            _padL(_formatMoney(amt), amtWidth) +
+            (show80mmDate ? _padL(dateStr, dateWidth) : ''),
+        styles: _escStyle(_style.billTableContent),
+      );
+
+      for (int i = 1; i < itemNameLines.length; i++) {
+        b += await _escPrintLine(
+          g,
+          _padR(itemNameLines[i], itemWidth),
+          styles: _escStyle(_style.billTableContent),
+        );
+      }
+
+      for (final variation in item.variations) {
+        final wrapped = _wrapIndented(
+          '- $variation',
+          itemWidth - 2,
+          itemWidth - 4,
+          '  ',
+        );
+        for (int i = 0; i < wrapped.length; i++) {
+          b += await _escPrintLine(
+            g,
+            i == 0 ? ' ${wrapped[i]}' : '   ${wrapped[i]}',
+            styles: _escStyle(_style.billTableMeta),
+          );
+        }
+      }
+
+      for (final addon in item.addons) {
+        final wrapped = _wrapIndented(
+          '+ $addon',
+          itemWidth - 2,
+          itemWidth - 4,
+          '  ',
+        );
+        for (int i = 0; i < wrapped.length; i++) {
+          b += await _escPrintLine(
+            g,
+            i == 0 ? ' ${wrapped[i]}' : '   ${wrapped[i]}',
+            styles: _escStyle(_style.billTableMeta),
+          );
+        }
+      }
+    }
+
+    return b;
+  }
+
+  static Future<List<int>> _escPriceDetailAmounts(
+    Generator g,
+    Map<String, dynamic> amounts, {
+    required String serviceChargeLabel,
+  }) async {
+    List<int> b = [];
+    double d(String key) =>
+        double.tryParse(amounts[key]?.toString() ?? '0') ?? 0.0;
+
+    Future<void> line(String label, String value) async {
+      b += await _escPrintLine(
+        g,
+        _alignRightLabelValue(label, value),
+        styles: _escStyle(_style.billAmountLine),
+      );
+    }
+
+    await line('Item Total', d('order_item_total').toStringAsFixed(2));
+    final serviceCharge = d('service_charge_amount');
+    if (serviceCharge > 0) {
+      await line(serviceChargeLabel, serviceCharge.toStringAsFixed(2));
+    }
+    final deliveryCharge = d('delivery_charge');
+    if (deliveryCharge > 0) {
+      await line('Delivery Charge', deliveryCharge.toStringAsFixed(2));
+    }
+    final discountAmount = d('discount_amount');
+    if (discountAmount > 0) {
+      await line('Discount', discountAmount.toString());
+    }
+    final packingCharge = d('packing_charge');
+    if (packingCharge > 0) {
+      await line('Packing Charge', packingCharge.toStringAsFixed(2));
+    }
+    final couponCode = amounts['coupon_code']?.toString() ?? '';
+    if (couponCode.isNotEmpty) {
+      await line('Coupon Code', couponCode);
+    }
+    final loyaltyAmount = d('loyalty_discount_amount');
+    if (loyaltyAmount > 0) {
+      await line('Loyalty', loyaltyAmount.toString());
+    }
+    final walletAmount = d('wallet_used_amount');
+    if (walletAmount > 0) {
+      await line('Wallet', walletAmount.toString());
+    }
+    final tip = d('tip_amount');
+    if (tip > 0) {
+      await line('Tip', tip.toStringAsFixed(2));
+    }
+    await line('Sub Total', d('order_subtotal').toStringAsFixed(2));
+    final gstTax = d('gst_tax');
+    if (gstTax > 0) {
+      await line('CGST', (gstTax / 2).toStringAsFixed(2));
+      await line('SGST', (gstTax / 2).toStringAsFixed(2));
+    }
+    final vatTax = d('vat_tax');
+    if (vatTax > 0) {
+      await line('VAT', vatTax.toStringAsFixed(2));
+    }
+    final orderTotal = double.tryParse(
+          (amounts['payment_amount'] ?? amounts['grant_amount'])
+                  ?.toString() ??
+              '0',
+        ) ??
+        0.0;
+    await line('Order Total', _formatMoney(orderTotal));
+    return b;
+  }
+
   // ── Logo helpers ─────────────────────────────────────────────────
   static String _resolveLogoUrl(String path) {
     if (path.isEmpty) return '';
@@ -1045,7 +1223,7 @@ class EscPosFormatter {
       b += await _escPrintLine(g, lineDashes,
           styles: const PosStyles(align: PosAlign.center, bold: true));
       b += await _escPrintLine(g, 
-        'GST Detail',
+        '-- GST Detail --',
         styles: _escStyle(
           _style.billAmountLine,
           align: PosAlign.center,
@@ -1212,32 +1390,60 @@ class EscPosFormatter {
       }
     }
 
-    // ── Previous Room Bill — only for room orders ─────────
+    // ── Previous Room Bills — only for room orders ─────────
     if (isRoomOrder) {
       b += await _escPrintLine(g, lineDashes,
           styles: const PosStyles(align: PosAlign.center, bold: true));
-      b += await _escPrintLine(g, 
-        '-- Previous Room Bill --',
+      b += await _escPrintLine(g,
+        '-- Previous Room Bills --',
         styles: _escStyle(_style.roomHeader, align: PosAlign.center),
       );
       b += await _escPrintLine(g, lineDashes,
           styles: const PosStyles(align: PosAlign.center, bold: true));
 
       for (final assoc in associatedOrders) {
-        final aMap = assoc as Map<String, dynamic>;
+        if (assoc is! Map) continue;
+        final aMap = Map<String, dynamic>.from(assoc);
         final aId = aMap['restaurant_order_id']?.toString() ?? '';
-        final aAmt =
-            double.tryParse(aMap['order_amount']?.toString() ?? '0') ?? 0.0;
-        b += await _escPrintLine(g, 
-          _alignLR('Order ID #$aId', aAmt.toStringAsFixed(2)),
+        final date = OrderItem.associatedOrderDate(aMap['order_date']);
+        final priceDetail = aMap['priceDetail'] is Map
+            ? Map<String, dynamic>.from(aMap['priceDetail'] as Map)
+            : <String, dynamic>{};
+        final headerAmt = double.tryParse(
+              (priceDetail['payment_amount'] ??
+                      priceDetail['grant_amount'] ??
+                      aMap['order_amount'])
+                  ?.toString() ??
+                  '0',
+            ) ??
+            0.0;
+
+        b += await _escPrintLine(g,
+          _assocHeaderLine(aId, date, headerAmt.toStringAsFixed(2)),
           styles: _escStyle(_style.roomContent),
         );
+
+        final items =
+            OrderItem.fromAssociatedOrderDetails(aMap['orderDetails']);
+        if (items.isNotEmpty) {
+          b += await _escAssociatedItemTable(g, items);
+        }
+
+        if (priceDetail.isNotEmpty) {
+          b += await _escPrintLine(g, lineDashes,
+              styles: const PosStyles(align: PosAlign.center, bold: true));
+          b += await _escPriceDetailAmounts(
+            g,
+            priceDetail,
+            serviceChargeLabel: profile.serviceChargeLabel,
+          );
+        }
+
+        b += await _escPrintLine(g, lineDashes,
+            styles: const PosStyles(align: PosAlign.center, bold: true));
       }
 
-      b += await _escPrintLine(g, lineDashes,
-          styles: const PosStyles(align: PosAlign.center, bold: true));
-
-      b += await _escPrintLine(g, 
+      b += await _escPrintLine(g,
         _alignLR('GRAND TOTAL ${payLabel()}',
             'Rs.${grantAmount.toStringAsFixed(0)}'),
         styles: _escStyle(_style.billGrandTotal, align: PosAlign.center),

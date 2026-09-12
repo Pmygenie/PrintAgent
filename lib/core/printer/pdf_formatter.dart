@@ -660,6 +660,15 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
     // final totalLabel = isRoomOrder ? 'TOTAL' : 'TOTAL ${payLabel()}';
     final totalLabel = isRoomOrder ? 'TOTAL' : 'TOTAL';
 
+    final roomWidgets = isRoomOrder
+        ? await _roomOrderWidgets(
+            associatedOrders,
+            grantAmount,
+            payLabel(),
+            serviceChargeLabel: profile.serviceChargeLabel,
+          )
+        : const <pw.Widget>[];
+
     return pw.MultiPage(
       pageFormat: _pageFormat,
       build: (_) => [
@@ -840,7 +849,7 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
               : buildDottedLine(180),
           pw.Center(
             child: pw.Text(
-              '-- Previous Room Bill --',
+              '-- Previous Room Bills --',
               style: _text(
                   size: _roomAssociatedHeaderTextSize,
                   bold: _roomAssociatedHeaderTextBold),
@@ -849,11 +858,7 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
           _simpleDividerOrDotted
               ? _divider(dashed: true)
               : buildDottedLine(180),
-          ..._roomOrderWidgets(
-            associatedOrders,
-            grantAmount,
-            payLabel(),
-          ),
+          ...roomWidgets,
         ],
 
         // ── QR codes — bill only, never on aggregator orders ──
@@ -1372,7 +1377,10 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
     ];
   }
 
-  static Future<List<pw.Widget>> _billItems(RestaurantOrder o) async {
+  static Future<List<pw.Widget>> _billItems(RestaurantOrder o) =>
+      _billItemRows(OrderItem.mergedForBill(o.items));
+
+  static Future<List<pw.Widget>> _billItemRows(List<OrderItem> items) async {
     final rows = <pw.Widget>[];
     final textSize = _billTableContentTextSize;
     final textbold = _billTableContentTextBold;
@@ -1382,27 +1390,12 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
     final contentStyle = _text(size: textSize, bold: textbold);
     final metaStyle = _text(size: metaSize, bold: metaBold);
 
-    for (final item in OrderItem.mergedForBill(o.items)) {
+    for (final item in items) {
       if (item.foodStatus == 3) continue;
 
-      final isComp = item.complementary?.toString().toLowerCase() == 'yes';
-
-      final effectivePrice =
-          (item.itemUnit.isNotEmpty && item.itemUnitPrice > 0)
-              ? item.itemUnitPrice
-              : item.price;
-
-      // Variation items: PRICE = base + variation (addon stays out of PRICE)
-      final displayUnitPrice = item.variations.isNotEmpty
-          ? effectivePrice + item.variationTotal
-          : effectivePrice;
-      final basePrice = isComp ? 0.0 : displayUnitPrice;
-
-      final unitTotalPrice =
-          effectivePrice + item.variationTotal + item.addonTotal;
-      final amt = isComp ? 0.0 : unitTotalPrice * item.quantity;
-
-      final displayName = isComp ? '${item.name} (Comp)' : item.name;
+      final basePrice = item.billPriceColumn;
+      final amt = item.billLineAmount;
+      final displayName = item.billDisplayName;
 
       final qtyDisplay = item.itemUnit.isNotEmpty
           ? '${_formatQty(item.quantity)}${item.itemUnit}'
@@ -1413,7 +1406,7 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
       final isGramUnit798 = PrintConfig.restaurantId == 798 &&
           item.itemUnit.trim().toLowerCase() == 'gm';
       final priceDisplay = isGramUnit798
-          ? '${_formatMoney(basePrice * 1000)}'
+          ? _formatMoney(basePrice * 1000)
           : _formatMoney(basePrice);
 
       final nameWidget = await ReceiptTextRenderer.buildReceiptText(
@@ -1556,7 +1549,7 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
     return [
       _simpleDividerOrDotted ? _divider() : buildDottedLine(180),
       pw.Center(
-        child: pw.Text('GST Detail', style: headerStyle),
+        child: pw.Text('-- GST Detail --', style: headerStyle),
       ),
       for (final row in rows)
         pw.Row(
@@ -1725,42 +1718,90 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
   // ROOM ORDER DETAILS
   // ═══════════════════════════════════════════════════════════════════
 
-  static List<pw.Widget> _roomOrderWidgets(
-    List<dynamic> associatedOrders,
+  static Future<List<pw.Widget>> _roomOrderWidgets(
+    List<dynamic>? associatedOrders,
     double grantAmount,
-    String payLabel,
-  ) {
+    String payLabel, {
+    required String serviceChargeLabel,
+  }) async {
     final widgets = <pw.Widget>[];
 
-    for (final assoc in associatedOrders) {
-      final aMap = assoc as Map<String, dynamic>;
+    for (final assoc in associatedOrders ?? const []) {
+      if (assoc is! Map) continue;
+      final aMap = Map<String, dynamic>.from(assoc);
       final aId = aMap['restaurant_order_id']?.toString() ?? '';
-      final aAmt =
-          double.tryParse(aMap['order_amount']?.toString() ?? '0') ?? 0.0;
+      final date = OrderItem.associatedOrderDate(aMap['order_date']);
+      final priceDetail = aMap['priceDetail'] is Map
+          ? Map<String, dynamic>.from(aMap['priceDetail'] as Map)
+          : <String, dynamic>{};
+      final headerAmt = double.tryParse(
+            (priceDetail['payment_amount'] ??
+                    priceDetail['grant_amount'] ??
+                    aMap['order_amount'])
+                ?.toString() ??
+                '0',
+          ) ??
+          0.0;
 
       widgets.add(
         pw.Row(
           children: [
             pw.Expanded(
               child: pw.Text(
-                'Order ID #$aId',
+                '#$aId',
                 style: _text(
                     size: _roomAssociatedTextSize,
                     bold: _roomAssociatedTextBold),
               ),
             ),
-            pw.Text(
-              aAmt.toStringAsFixed(2),
-              style: _text(
-                  size: _roomAssociatedTextSize, bold: _roomAssociatedTextBold),
+            pw.Expanded(
+              child: pw.Text(
+                date,
+                textAlign: pw.TextAlign.center,
+                style: _text(
+                    size: _roomAssociatedTextSize,
+                    bold: _roomAssociatedTextBold),
+              ),
+            ),
+            pw.Expanded(
+              child: pw.Text(
+                headerAmt.toStringAsFixed(2),
+                textAlign: pw.TextAlign.right,
+                style: _text(
+                    size: _roomAssociatedTextSize,
+                    bold: _roomAssociatedTextBold),
+              ),
             ),
           ],
         ),
       );
-    }
 
-    widgets.add(
-        _simpleDividerOrDotted ? _divider(dashed: true) : buildDottedLine(180));
+      final items = OrderItem.fromAssociatedOrderDetails(aMap['orderDetails']);
+      if (items.isNotEmpty) {
+        widgets.addAll(_billTableHeader());
+        widgets.addAll(await _billItemRows(items));
+      }
+
+      if (priceDetail.isNotEmpty) {
+        widgets.add(
+          _simpleDividerOrDotted
+              ? _divider(dashed: true)
+              : buildDottedLine(180),
+        );
+        widgets.addAll(
+          _priceDetailAmountWidgets(
+            priceDetail,
+            serviceChargeLabel: serviceChargeLabel,
+          ),
+        );
+      }
+
+      widgets.add(
+        _simpleDividerOrDotted
+            ? _divider(dashed: true)
+            : buildDottedLine(180),
+      );
+    }
 
     widgets.addAll(_billTotalRow(
       'GRAND TOTAL',
@@ -1770,6 +1811,87 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
       subLabel: payLabel,
     ));
 
+    return widgets;
+  }
+
+  static List<pw.Widget> _priceDetailAmountWidgets(
+    Map<String, dynamic> amounts, {
+    required String serviceChargeLabel,
+  }) {
+    double d(String key) =>
+        double.tryParse(amounts[key]?.toString() ?? '0') ?? 0.0;
+
+    final itemTotal = d('order_item_total');
+    final serviceCharge = d('service_charge_amount');
+    final deliveryCharge = d('delivery_charge');
+    final tip = d('tip_amount');
+    final subTotal = d('order_subtotal');
+    final gstTax = d('gst_tax');
+    final vatTax = d('vat_tax');
+    final packingCharge = d('packing_charge');
+    final walletAmount = d('wallet_used_amount');
+    final loyaltyAmount = d('loyalty_discount_amount');
+    final discountAmount = d('discount_amount');
+    final couponCode = amounts['coupon_code']?.toString() ?? '';
+
+    final widgets = <pw.Widget>[
+      ..._billAmountLineWidgets('Item Total', itemTotal.toStringAsFixed(2)),
+    ];
+    if (serviceCharge > 0) {
+      widgets.addAll(_billAmountLineWidgets(
+        serviceChargeLabel,
+        serviceCharge.toStringAsFixed(2),
+      ));
+    }
+    if (deliveryCharge > 0) {
+      widgets.addAll(_billAmountLineWidgets(
+        'Delivery Charge',
+        deliveryCharge.toStringAsFixed(2),
+      ));
+    }
+    if (discountAmount > 0) {
+      widgets.addAll(
+          _billAmountLineWidgets('Discount', discountAmount.toString()));
+    }
+    if (packingCharge > 0) {
+      widgets.addAll(_billAmountLineWidgets(
+        'Packing Charge',
+        packingCharge.toStringAsFixed(2),
+      ));
+    }
+    if (couponCode.isNotEmpty) {
+      widgets.addAll(_billAmountLineWidgets('Coupon Code', couponCode));
+    }
+    if (loyaltyAmount > 0) {
+      widgets.addAll(
+          _billAmountLineWidgets('Loyalty', loyaltyAmount.toString()));
+    }
+    if (walletAmount > 0) {
+      widgets.addAll(_billAmountLineWidgets('Wallet', walletAmount.toString()));
+    }
+    if (tip > 0) {
+      widgets.addAll(_billAmountLineWidgets('Tip', tip.toStringAsFixed(2)));
+    }
+    widgets.addAll(
+        _billAmountLineWidgets('Sub Total', subTotal.toStringAsFixed(2)));
+    if (gstTax > 0) {
+      widgets.addAll(
+          _billAmountLineWidgets('CGST', (gstTax / 2).toStringAsFixed(2)));
+      widgets.addAll(
+          _billAmountLineWidgets('SGST', (gstTax / 2).toStringAsFixed(2)));
+    }
+    if (vatTax > 0) {
+      widgets.addAll(_billAmountLineWidgets('VAT', vatTax.toStringAsFixed(2)));
+    }
+    final orderTotal = double.tryParse(
+          (amounts['payment_amount'] ?? amounts['grant_amount'])
+                  ?.toString() ??
+              '0',
+        ) ??
+        0.0;
+    widgets.addAll(
+      _billAmountLineWidgets('Order Total', _formatMoney(orderTotal)),
+    );
     return widgets;
   }
 
