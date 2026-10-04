@@ -2,6 +2,7 @@ import 'dart:async';
 import '../models/printer_config.dart';
 import '../models/print_job.dart';
 import '../printer/ble_session_registry.dart';
+import '../printer/lan_session_registry.dart';
 import '../printer/printer_manager.dart';
 import 'print_queue.dart';
 
@@ -92,6 +93,7 @@ class PrintQueueManager {
   /// Must be called before creating a new [PrintQueueManager] on reconnect.
   Future<void> dispose() async {
     await BleSessionRegistry.disconnectAll();
+    await LanSessionRegistry.disconnectAll();
     for (final q in _queues.values) {
       q.dispose();
     }

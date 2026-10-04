@@ -8,6 +8,7 @@ import 'package:printer_agent/core/auth/auth_session_monitor.dart';
 import 'package:printer_agent/core/config/print_config.dart';
 import 'package:printer_agent/core/models/printer_config.dart';
 import 'package:printer_agent/core/printer/ble_session_registry.dart';
+import 'package:printer_agent/core/printer/lan_session_registry.dart';
 import 'package:printer_agent/core/profile/restaurant_profile_api.dart';
 import 'package:printer_agent/core/profile/restaurant_profile_model.dart';
 import 'package:printer_agent/core/profile/restaurant_profile_repository.dart';
@@ -164,6 +165,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // Drop keep-alive BLE links on logout (queue/socket may stay alive).
     await BleSessionRegistry.disconnectAll();
+    await LanSessionRegistry.disconnectAll();
 
     _keepSocketAliveOnDispose = true;
 

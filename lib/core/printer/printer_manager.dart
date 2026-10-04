@@ -13,6 +13,8 @@ import 'bitmap/bitmap_print_config.dart';
 import 'ble_session_registry.dart';
 import 'bluetooth_print_lock.dart';
 import 'escpos_formatter.dart';
+import 'lan_print_lock.dart';
+import 'lan_session_registry.dart';
 import 'op_timeout.dart';
 import 'usb_print_lock.dart';
 import 'usb_session_registry.dart';
@@ -134,6 +136,33 @@ class PrinterManager {
         );
       });
       log('🔓 USB lock release | Order Id - ${job.order.displayOrderId}');
+      return;
+    }
+
+    // LAN keep-alive: connect once per ip:port, paced writes, no per-job
+    // disconnect. Kitchen + Bill can share one TCP printer, so serialize.
+    final isLanKeepAlive =
+        config.type == PrinterType.lan || config.type == PrinterType.wifi;
+
+    if (isLanKeepAlive) {
+      final ip = config.ipAddress!;
+      final port = config.port;
+      log('🔒 LAN lock acquire $ip:$port | Order Id - ${job.order.displayOrderId}');
+      await LanPrintLock.exclusive(ip, port, () async {
+        await LanSessionRegistry.run(
+          ipAddress: ip,
+          port: port,
+          action: (driver) async {
+            for (int i = 0; i < copies; i++) {
+              await driver.sendBytes(bytes);
+              if (copies > 1 && i < copies - 1) {
+                await Future.delayed(const Duration(milliseconds: 300));
+              }
+            }
+          },
+        );
+      });
+      log('🔓 LAN lock release $ip:$port | Order Id - ${job.order.displayOrderId}');
       return;
     }
 

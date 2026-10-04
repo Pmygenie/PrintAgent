@@ -8,10 +8,10 @@
 class AppConstants {
   AppConstants._();
 
-  static const String apiUrl = 'https://preprod.mygenie.online';
-  static const String socketUrl = 'https://presocket.mygenie.online';
+  // static const String apiUrl = 'https://preprod.mygenie.online';
+  // static const String socketUrl = 'https://presocket.mygenie.online';
 
-  // static const String apiUrl = 'https://manage.mygenie.online';
-  // static const String socketUrl = 'https://socket.mygenie.online';
+  static const String apiUrl = 'https://manage.mygenie.online';
+  static const String socketUrl = 'https://socket.mygenie.online';
 }
                                                                                 

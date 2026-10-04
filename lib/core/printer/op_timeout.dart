@@ -13,8 +13,15 @@ class OpTimeout {
   OpTimeout._();
 
   // LAN — writes are local-network fast; connect already bounds itself.
+  static const lanConnect = Duration(seconds: 10);
   static const lanFlush = Duration(seconds: 10);
   static const lanClose = Duration(seconds: 5);
+
+  /// One TCP slice. Cheap Wi-Fi printers overflow if the whole receipt is
+  /// dumped in a single write (logo prints, items never arrive).
+  static const lanSliceBytes = 512;
+  static const lanSliceDelay = Duration(milliseconds: 40);
+  static const lanSettle = Duration(milliseconds: 400);
 
   // Windows classic Bluetooth (SPP).
   static const sppDiscover = Duration(seconds: 15);

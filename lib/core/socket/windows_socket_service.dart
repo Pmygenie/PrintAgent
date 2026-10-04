@@ -29,6 +29,11 @@ class WindowsSocketService {
   /// True while a socket-pushed config apply is in progress (avoids overlapping applies).
   bool _applyingConfig = false;
 
+  static const _hardReconnectDelay = Duration(seconds: 15);
+  Timer? _hardReconnectTimer;
+  bool _recycling = false;
+  bool _disposed = false;
+
   final _logController = StreamController<String>.broadcast();
   final _statusController = StreamController<bool>.broadcast();
   final _configUpdatedController = StreamController<void>.broadcast();
@@ -183,9 +188,16 @@ class WindowsSocketService {
   }
 
   void connect() {
+    if (_disposed) return;
+    _openSocket();
+    _socket!.connect();
+  }
+
+  void _openSocket() {
     _socket = IO.io(AppConstants.socketUrl, <String, dynamic>{
       'transports': ['websocket'],
       'autoConnect': false,
+      'forceNew': true,
       'reconnection': true,
       'reconnectionDelay': 2000,
       'reconnectionAttempts': 999999,
@@ -193,7 +205,11 @@ class WindowsSocketService {
 
     _socket!.onConnect((_) {
       _connected = true;
-      _statusController.add(true);
+      _recycling = false;
+      _cancelHardReconnect();
+      if (!_statusController.isClosed) {
+        _statusController.add(true);
+      }
       _log('✅ Connected to ${AppConstants.socketUrl}');
 
       // Join restaurant room on every connect/reconnect.
@@ -210,8 +226,11 @@ class WindowsSocketService {
 
     _socket!.onDisconnect((_) {
       _connected = false;
-      _statusController.add(false);
+      if (!_statusController.isClosed) {
+        _statusController.add(false);
+      }
       _log('❌ Disconnected — retrying...');
+      _scheduleHardReconnect();
     });
 
     _socket!.onReconnect((_) {
@@ -220,7 +239,45 @@ class WindowsSocketService {
     });
 
     _socket!.onError((e) => _log('⚠️ Socket error: $e'));
+    _socket!.onConnectError((e) => _log('⚠️ Socket connect_error: $e'));
+  }
+
+  void _scheduleHardReconnect() {
+    if (_disposed || _recycling || _connected) return;
+    if (_hardReconnectTimer?.isActive == true) return;
+    _log('⏳ Hard reconnect in ${_hardReconnectDelay.inSeconds}s if still down');
+    _hardReconnectTimer = Timer(_hardReconnectDelay, () {
+      if (_disposed || _connected) return;
+      _recycleSocket();
+    });
+  }
+
+  void _cancelHardReconnect() {
+    _hardReconnectTimer?.cancel();
+    _hardReconnectTimer = null;
+  }
+
+  void _recycleSocket() {
+    if (_disposed || _connected || _recycling) return;
+    _recycling = true;
+    _cancelHardReconnect();
+    _log('♻️ Hard reconnect — creating new socket');
+
+    final old = _socket;
+    _socket = null;
+    try {
+      old?.disconnect();
+      old?.dispose();
+    } catch (_) {}
+
+    if (_disposed) {
+      _recycling = false;
+      return;
+    }
+
+    _openSocket();
     _socket!.connect();
+    _recycling = false;
   }
 
   void _registerListeners() {
@@ -231,6 +288,11 @@ class WindowsSocketService {
     // ═══════════════════════════════════════════════════════════════════
     _socket!.off('new_order_$restaurantId');
     _socket!.on('new_order_$restaurantId', (data) async {
+      if (_isScanRazorpayHold(data)) {
+        _log(
+            '⏩ Razorpay hold f_order_status=8 — skip KOT #${_scanOrderDisplayId(data)}');
+        return;
+      }
       log('📡 Received new_order_$restaurantId : $data');
       try {
         final payload = data as List<dynamic>;
@@ -1133,12 +1195,44 @@ class WindowsSocketService {
     );
   }
 
+  /// scan-new-order with f_order_status 8 is the Razorpay popup hold.
+  /// The order is stored before payment; it is not a kitchen order yet.
+  bool _isScanRazorpayHold(dynamic data) {
+    final order = _scanOrderMap(data);
+    if (order == null) return false;
+    final status = order['f_order_status'];
+    final n = status is int ? status : int.tryParse(status?.toString() ?? '');
+    return n == 8;
+  }
+
+  String _scanOrderDisplayId(dynamic data) {
+    return _scanOrderMap(data)?['restaurant_order_id']?.toString() ?? '';
+  }
+
+  Map<String, dynamic>? _scanOrderMap(dynamic data) {
+    try {
+      if (data is! List || data.isEmpty) return null;
+      if (data[0].toString() != 'scan-new-order') return null;
+      if (data.length < 5 || data[4] == null) return null;
+      final raw = data[4] is String ? jsonDecode(data[4]) : data[4];
+      if (raw is! Map) return null;
+      final orders = raw['orders'];
+      final order = (orders is List && orders.isNotEmpty) ? orders.first : raw;
+      if (order is! Map) return null;
+      return Map<String, dynamic>.from(order);
+    } catch (_) {
+      return null;
+    }
+  }
+
   void _log(String msg) {
     print('[WinSocket] $msg');
     _logController.add(msg);
   }
 
   void disconnect() {
+    _disposed = true;
+    _cancelHardReconnect();
     _socket?.disconnect();
     _socket?.dispose();
     _logController.close();
