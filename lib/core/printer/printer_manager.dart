@@ -139,8 +139,8 @@ class PrinterManager {
       return;
     }
 
-    // LAN keep-alive: connect once per ip:port, paced writes, no per-job
-    // disconnect. Kitchen + Bill can share one TCP printer, so serialize.
+    // LAN/Wi-Fi: connect, send, and close on every job. Kitchen + Bill can
+    // share one TCP printer, so serialize. A cached idle socket is not reused.
     final isLanKeepAlive =
         config.type == PrinterType.lan || config.type == PrinterType.wifi;
 

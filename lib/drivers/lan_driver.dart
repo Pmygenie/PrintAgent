@@ -53,13 +53,18 @@ class LanPrinterDriver implements PrinterDriver {
       port,
       timeout: OpTimeout.lanConnect,
     );
-    socket.setOption(SocketOption.tcpNoDelay, true);
+    _socket = socket;
+    try {
+      socket.setOption(SocketOption.tcpNoDelay, true);
+    } catch (_) {
+      abort();
+      rethrow;
+    }
     socket.done.then((_) {
       _alive = false;
     }).catchError((_) {
       _alive = false;
     });
-    _socket = socket;
     _alive = true;
     print('[LAN] CONNECTED $_label');
   }
@@ -101,6 +106,7 @@ class LanPrinterDriver implements PrinterDriver {
     );
   }
 
+  /// Graceful close after a successful send.
   @override
   Future<void> disconnect() async {
     final socket = _socket;
@@ -119,5 +125,15 @@ class LanPrinterDriver implements PrinterDriver {
       socket.destroy();
     }
     print('[LAN] DISCONNECTED $_label');
+  }
+
+  /// Drops the socket in both directions. Use when connect or send already failed.
+  void abort() {
+    final socket = _socket;
+    _socket = null;
+    _alive = false;
+    if (socket == null) return;
+    socket.destroy();
+    print('[LAN] ABORT $_label');
   }
 }

@@ -17,6 +17,10 @@ class OpTimeout {
   static const lanFlush = Duration(seconds: 10);
   static const lanClose = Duration(seconds: 5);
 
+  /// Pause before the single fresh-connection retry. A sleepy Wi-Fi printer
+  /// often misses the first SYN; this gives it a moment to answer.
+  static const lanReconnectGap = Duration(milliseconds: 500);
+
   /// One TCP slice. Cheap Wi-Fi printers overflow if the whole receipt is
   /// dumped in a single write (logo prints, items never arrive).
   static const lanSliceBytes = 512;

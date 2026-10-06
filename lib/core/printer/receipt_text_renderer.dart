@@ -80,19 +80,23 @@ class ReceiptTextRenderer {
     double maxWidth = double.infinity,
     TextAlign textAlign = TextAlign.left,
   }) async {
-    await ensureGujaratiFont();
+    final useGujaratiFont = containsGujarati(text);
+    if (useGujaratiFont) {
+      await ensureGujaratiFont();
+    }
 
     final fontSize = style.fontSize ?? 10;
     final bold = style.fontWeight == FontWeight.bold;
+    final family = useGujaratiFont ? _gujaratiFamily : (style.fontFamily ?? '');
     final cacheKey =
-        '$text|$fontSize|$bold|${textAlign.index}|${maxWidth.isFinite ? maxWidth.toStringAsFixed(1) : 0}';
+        '$text|$fontSize|$bold|$family|${textAlign.index}|${maxWidth.isFinite ? maxWidth.toStringAsFixed(1) : 0}';
 
     final hit = _imageCache[cacheKey];
     if (hit != null) return hit;
 
     final scaled = style.copyWith(
       fontSize: fontSize * _scale,
-      fontFamily: _gujaratiFamily,
+      fontFamily: useGujaratiFont ? _gujaratiFamily : style.fontFamily,
       color: style.color ?? Colors.black,
       height: style.height ?? 1.15,
     );

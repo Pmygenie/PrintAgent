@@ -370,16 +370,24 @@ class EscPosFormatter {
     return firstSize == secondSize && first.escBold == second.escBold;
   }
 
-  static final _gujaratiRe = RegExp(r'[\u0A80-\u0AFF]');
+  /// Printable ASCII stays ESC/POS text. Anything else (Gujarati, accents,
+  /// currency signs, emoji) is drawn as an image so Latin-1 encoding cannot
+  /// abort the ticket.
+  static bool _needsRaster(String text) {
+    for (final c in text.runes) {
+      if (c < 0x20 || c > 0x7E) return true;
+    }
+    return false;
+  }
 
-  /// English → ESC/POS text. Gujarati → raster image so LAN printers don't
+  /// English → ESC/POS text. Non-ASCII → raster image so printers don't
   /// throw Latin-1 "Contains invalid characters".
   static Future<List<int>> _escPrintLine(
     Generator g,
     String text, {
     required PosStyles styles,
   }) async {
-    if (text.isEmpty || !_gujaratiRe.hasMatch(text)) {
+    if (text.isEmpty || !_needsRaster(text)) {
       return g.text(text, styles: styles);
     }
 
@@ -496,9 +504,7 @@ class EscPosFormatter {
       if (text.isEmpty) continue;
 
       // Latin QTY (e.g. "100gm") must not wrap inside a narrow band.
-      final layoutMax = _gujaratiRe.hasMatch(text)
-          ? bandW / 3.0
-          : double.infinity;
+      final layoutMax = _needsRaster(text) ? bandW / 3.0 : double.infinity;
 
       final png = await ReceiptTextRenderer.renderTextToImage(
         text,
@@ -613,15 +619,30 @@ class EscPosFormatter {
       final itemNameLines = _wrapItemName(item.billDisplayName, itemWidth);
       final dateStr = show80mmDate ? _escItemDate(item.createdAt) : '';
 
-      b += await _escPrintLine(
-        g,
-        _padR(itemNameLines.first, itemWidth) +
-            _padC(qtyDisplay, qtyWidth) +
-            _padC(priceDisplay, priceWidth) +
-            _padL(_formatMoney(amt), amtWidth) +
-            (show80mmDate ? _padL(dateStr, dateWidth) : ''),
-        styles: _escStyle(_style.billTableContent),
-      );
+      if (_needsRaster(itemNameLines.first)) {
+        b += await _escPrintColumns(
+          g,
+          [
+            _EscCol(itemNameLines.first, itemWidth),
+            _EscCol(qtyDisplay, qtyWidth, align: TextAlign.center),
+            _EscCol(priceDisplay, priceWidth, align: TextAlign.center),
+            _EscCol(_formatMoney(amt), amtWidth, align: TextAlign.right),
+            if (show80mmDate)
+              _EscCol(dateStr, dateWidth, align: TextAlign.right),
+          ],
+          styles: _escStyle(_style.billTableContent),
+        );
+      } else {
+        b += await _escPrintLine(
+          g,
+          _padR(itemNameLines.first, itemWidth) +
+              _padC(qtyDisplay, qtyWidth) +
+              _padC(priceDisplay, priceWidth) +
+              _padL(_formatMoney(amt), amtWidth) +
+              (show80mmDate ? _padL(dateStr, dateWidth) : ''),
+          styles: _escStyle(_style.billTableContent),
+        );
+      }
 
       for (int i = 1; i < itemNameLines.length; i++) {
         b += await _escPrintLine(
@@ -964,7 +985,7 @@ class EscPosFormatter {
 
       final dateStr = show80mmDate ? _escItemDate(item.createdAt) : '';
 
-      if (_gujaratiRe.hasMatch(itemNameLines.first)) {
+      if (_needsRaster(itemNameLines.first)) {
         b += await _escPrintColumns(
           g,
           [
@@ -1612,7 +1633,7 @@ class EscPosFormatter {
       final itemNameLines = _wrapItemName(item.name.trim(), itemWidth);
       final kotItemStyles = _escStyle(_style.kotTableContent);
 
-      if (_gujaratiRe.hasMatch(itemNameLines.first)) {
+      if (_needsRaster(itemNameLines.first)) {
         b += await _escPrintColumns(
           g,
           [
@@ -1632,7 +1653,7 @@ class EscPosFormatter {
       }
 
       for (int i = 1; i < itemNameLines.length; i++) {
-        if (_gujaratiRe.hasMatch(itemNameLines[i])) {
+        if (_needsRaster(itemNameLines[i])) {
           b += await _escPrintColumns(
             g,
             [
@@ -1871,7 +1892,7 @@ class EscPosFormatter {
       final itemNameLines = _wrapItemName(item.name.trim(), itemWidth);
       final kotItemStyles = _escStyle(_style.kotTableContent);
 
-      if (_gujaratiRe.hasMatch(itemNameLines.first)) {
+      if (_needsRaster(itemNameLines.first)) {
         b += await _escPrintColumns(
           g,
           [
@@ -1891,7 +1912,7 @@ class EscPosFormatter {
       }
 
       for (int i = 1; i < itemNameLines.length; i++) {
-        if (_gujaratiRe.hasMatch(itemNameLines[i])) {
+        if (_needsRaster(itemNameLines[i])) {
           b += await _escPrintColumns(
             g,
             [
@@ -2095,12 +2116,13 @@ class EscPosFormatter {
     return input.split('').map((ch) => '$ch$overlay').join();
   }
 
-  /// Latin wrap by char count splits Indic + English (e.g. "બરફી 100gm")
-  /// onto separate lines; keep Gujarati names as one raster line.
+  /// Latin wrap by char count splits Indic, emoji, and accents
+  /// (e.g. "બરફી 100gm") onto separate lines; keep those names as one
+  /// raster line. The image renderer wraps them to the paper width.
   static List<String> _wrapItemName(String text, int width) {
     final clean = text.replaceAll(RegExp(r'\s+'), ' ').trim();
     if (clean.isEmpty) return [''];
-    if (_gujaratiRe.hasMatch(clean)) return [clean];
+    if (_needsRaster(clean)) return [clean];
     return _wrapText(clean, width);
   }
 
