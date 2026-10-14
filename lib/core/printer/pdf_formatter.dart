@@ -119,7 +119,14 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
                 PrintConfig.upiQrEnabled &&
                 PrintConfig.upiId.trim().isNotEmpty)
             ? await _generateQrImage(
-                PrintConfig.upiQrDataForBill(job.order.billData))
+                PrintConfig.upiQrDataForBill(
+                  job.order.billData,
+                  amountOverride: ReceiptBusinessLogic.printedBillTotal(
+                    job.order.billData,
+                    restaurantProfile,
+                  ),
+                ),
+              )
             : null;
         final feedbackQrImage = (!isAggregator && PrintConfig.feedbackQrEnabled)
             ? await _generateQrImage(
@@ -628,7 +635,6 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
     final vatTax = d('vat_tax');
     final packingCharge = d('packing_charge');
     final grantAmount = d('grant_amount');
-    final paymentAmount = d('payment_amount');
     final roomAdvance = d('room_advance_pay');
     final roomPending = d('room_remaining_pay');
     final isAggregator = bill['is_aggregator'] == true;
@@ -656,7 +662,9 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
       return 'Paid by $method';
     }
 
-    final totalAmount = isRoomOrder ? paymentAmount : grantAmount;
+    final totalAmount =
+        ReceiptBusinessLogic.printedBillTotal(bill, profile);
+    final roundOff = ReceiptBusinessLogic.roundOffAmount(bill, profile);
     // final totalLabel = isRoomOrder ? 'TOTAL' : 'TOTAL ${payLabel()}';
     final totalLabel = isRoomOrder ? 'TOTAL' : 'TOTAL';
 
@@ -814,6 +822,11 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
           ..._billAmountLineWidgets(
             'Room Pending',
             roomPending.toStringAsFixed(2),
+          ),
+        if (roundOff.abs() >= 0.005)
+          ..._billAmountLineWidgets(
+            'Round Off',
+            roundOff.toStringAsFixed(2),
           ),
 
         // ── Total ──

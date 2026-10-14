@@ -25,8 +25,10 @@ class ReceiptTextRenderer {
   ReceiptTextRenderer._();
 
   static const _gujaratiFamily = 'ReceiptGujarati';
+  static const _emojiFamily = 'ReceiptEmoji';
   static const _scale = 3.0;
   static const _gujaratiRe = r'[\u0A80-\u0AFF]';
+  static final _emojiRe = RegExp(r'\p{Extended_Pictographic}', unicode: true);
 
   static bool _fontReady = false;
   static final Map<String, _CachedTextImage> _imageCache = {};
@@ -36,6 +38,8 @@ class ReceiptTextRenderer {
 
   static bool containsGujarati(String text) =>
       RegExp(_gujaratiRe).hasMatch(text);
+
+  static bool containsEmoji(String text) => _emojiRe.hasMatch(text);
 
   static Future<void> ensureGujaratiFont() async {
     if (_fontReady) return;
@@ -84,12 +88,13 @@ class ReceiptTextRenderer {
     if (useGujaratiFont) {
       await ensureGujaratiFont();
     }
+    final useEmojiFont = containsEmoji(text);
 
     final fontSize = style.fontSize ?? 10;
     final bold = style.fontWeight == FontWeight.bold;
     final family = useGujaratiFont ? _gujaratiFamily : (style.fontFamily ?? '');
     final cacheKey =
-        '$text|$fontSize|$bold|$family|${textAlign.index}|${maxWidth.isFinite ? maxWidth.toStringAsFixed(1) : 0}';
+        '$text|$fontSize|$bold|$family|${useEmojiFont ? _emojiFamily : ''}|${textAlign.index}|${maxWidth.isFinite ? maxWidth.toStringAsFixed(1) : 0}';
 
     final hit = _imageCache[cacheKey];
     if (hit != null) return hit;
@@ -97,6 +102,8 @@ class ReceiptTextRenderer {
     final scaled = style.copyWith(
       fontSize: fontSize * _scale,
       fontFamily: useGujaratiFont ? _gujaratiFamily : style.fontFamily,
+      fontFamilyFallback:
+          useEmojiFont ? const [_emojiFamily] : style.fontFamilyFallback,
       color: style.color ?? Colors.black,
       height: style.height ?? 1.15,
     );

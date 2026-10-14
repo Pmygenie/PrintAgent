@@ -14,4 +14,3 @@ class AppConstants {
   static const String apiUrl = 'https://manage.mygenie.online';
   static const String socketUrl = 'https://socket.mygenie.online';
 }
-                                                                                

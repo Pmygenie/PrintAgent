@@ -292,16 +292,17 @@ class PrintConfig {
   }
 
   /// UPI payment QR payload — static (`am=0`) or dynamic (bill total in `am`).
-  static String upiQrDataForBill(Map<String, dynamic> bill) {
+  /// [amountOverride] is the printed payable total (rounded when enabled).
+  /// Without it, dynamic UPI falls back to raw `grant_amount`.
+  static String upiQrDataForBill(
+    Map<String, dynamic> bill, {
+    double? amountOverride,
+  }) {
     double d(String key) =>
         double.tryParse(bill[key]?.toString() ?? '0') ?? 0.0;
 
     final grantAmount = d('grant_amount');
-    final paymentAmount = d('payment_amount');
-    final associatedOrders = bill['associated_orders'] as List<dynamic>?;
-    final isRoomOrder = associatedOrders != null && associatedOrders.isNotEmpty;
-    // final totalAmount = isRoomOrder ? paymentAmount : grantAmount;
-    final totalAmount = grantAmount;
+    final totalAmount = amountOverride ?? grantAmount;
 
     final amount = upiDynamicEnabled ? totalAmount.toStringAsFixed(2) : '0';
     return 'upi://pay?pa=$upiId&pn=&am=$amount&tn=';

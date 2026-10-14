@@ -196,11 +196,15 @@ class _EscCol {
   final String text;
   final int chars;
   final TextAlign align;
+  final int leftPadChars;
+  final int rightPadChars;
 
   const _EscCol(
     this.text,
     this.chars, {
     this.align = TextAlign.left,
+    this.leftPadChars = 0,
+    this.rightPadChars = 0,
   });
 }
 
@@ -244,7 +248,14 @@ class EscPosFormatter {
       final upiQrImage = (!isAggregator &&
               PrintConfig.upiQrEnabled &&
               PrintConfig.upiId.trim().isNotEmpty)
-          ? _buildQrBitmap(PrintConfig.upiQrDataForBill(job.order.billData),
+          ? _buildQrBitmap(
+              PrintConfig.upiQrDataForBill(
+                job.order.billData,
+                amountOverride: ReceiptBusinessLogic.printedBillTotal(
+                  job.order.billData,
+                  restaurantProfile,
+                ),
+              ),
               _style.escUpiQrSizeMm)
           : null;
       final feedbackQrImage = (!isAggregator && PrintConfig.feedbackQrEnabled)
@@ -380,6 +391,21 @@ class EscPosFormatter {
     return false;
   }
 
+  /// Curly quotes and dashes print as plain ASCII so the row stays in the
+  /// text columns. Gujarati, accents, and emoji are left unchanged.
+  static String _plainPunctuation(String text) {
+    return text
+        .replaceAll('“', '"')
+        .replaceAll('”', '"')
+        .replaceAll('„', '"')
+        .replaceAll('’', "'")
+        .replaceAll('‘', "'")
+        .replaceAll('–', '-')
+        .replaceAll('—', '-')
+        .replaceAll('…', '...')
+        .replaceAll('\u00A0', ' ');
+  }
+
   /// English → ESC/POS text. Non-ASCII → raster image so printers don't
   /// throw Latin-1 "Contains invalid characters".
   static Future<List<int>> _escPrintLine(
@@ -387,6 +413,7 @@ class EscPosFormatter {
     String text, {
     required PosStyles styles,
   }) async {
+    text = _plainPunctuation(text);
     if (text.isEmpty || !_needsRaster(text)) {
       return g.text(text, styles: styles);
     }
@@ -396,7 +423,7 @@ class EscPosFormatter {
       if (raster == null) {
         return g.text(_latin1Safe(text), styles: styles);
       }
-      return g.image(raster, align: styles.align);
+      return _escPrintImage(g, raster, align: styles.align);
     } catch (_) {
       return g.text(_latin1Safe(text), styles: styles);
     }
@@ -421,6 +448,58 @@ class EscPosFormatter {
     if (styles.height == PosTextSize.size3) return base * 3;
     if (styles.height == PosTextSize.size2) return base * 2;
     return base;
+  }
+
+  /// One ESC/POS text line, in the same pixels [ReceiptTextRenderer] draws.
+  static int _escImageLineHeightPx(PosStyles styles) {
+    final fontPx = _escImageFontSize(styles) * 3;
+    return (fontPx * 1.15 + 4).ceil();
+  }
+
+  /// Emoji fonts leave a tall empty box under the glyph. Drop that padding
+  /// and fit the ink to one text line so the printer does not spill it.
+  static img.Image _fitEmojiLine(img.Image source, PosStyles styles) {
+    var image = _trimVerticalPadding(source);
+    final maxH = _escImageLineHeightPx(styles);
+    if (image.height <= maxH) return image;
+    final width =
+        (image.width * maxH / image.height).round().clamp(1, image.width);
+    return img.copyResize(image, width: width, height: maxH);
+  }
+
+  static img.Image _trimVerticalPadding(img.Image source) {
+    bool inkRow(int y) {
+      for (var x = 0; x < source.width; x++) {
+        final p = source.getPixel(x, y);
+        final r = p.r.toDouble();
+        final g = p.g.toDouble();
+        final b = p.b.toDouble();
+        final dark = r <= 1
+            ? (r < 0.98 || g < 0.98 || b < 0.98)
+            : (r < 250 || g < 250 || b < 250);
+        if (dark) return true;
+      }
+      return false;
+    }
+
+    var top = 0;
+    while (top < source.height && !inkRow(top)) {
+      top++;
+    }
+    if (top >= source.height) return source;
+    var bottom = source.height - 1;
+    while (bottom > top && !inkRow(bottom)) {
+      bottom--;
+    }
+    final height = bottom - top + 1;
+    if (top == 0 && height == source.height) return source;
+    return img.copyCrop(
+      source,
+      x: 0,
+      y: top,
+      width: source.width,
+      height: height,
+    );
   }
 
   static Future<img.Image?> _rasterizeGujaratiLine(
@@ -449,6 +528,9 @@ class EscPosFormatter {
 
     var decoded = img.decodeImage(png);
     if (decoded == null) return null;
+    if (ReceiptTextRenderer.containsEmoji(text)) {
+      decoded = _fitEmojiLine(decoded, styles);
+    }
     if (decoded.width > paperDots) {
       decoded = img.copyResize(decoded, width: paperDots);
     }
@@ -468,14 +550,208 @@ class EscPosFormatter {
     try {
       final raster = await _rasterizeColumnRow(columns, styles);
       if (raster == null) {
-        final fallback = columns.map((c) => c.text).join(' ');
-        return _escPrintLine(g, fallback, styles: styles);
+        return _paddedColumnFallback(g, columns, styles);
       }
-      return g.image(raster, align: PosAlign.left);
+      return _escPrintImage(g, raster, align: PosAlign.left, columns: columns);
     } catch (_) {
-      final fallback = columns.map((c) => c.text).join(' ');
-      return _escPrintLine(g, fallback, styles: styles);
+      return _paddedColumnFallback(g, columns, styles);
     }
+  }
+
+  /// Pictures wider than 255 dots are split. This head only reads the low
+  /// byte of an ESC * width, so a 384-dot row otherwise prints the left
+  /// part and dumps the rest as blocks and stray letters. Pieces of one
+  /// band are sent before the line feed so they stay on the same line.
+  /// A picture of 255 dots or less still uses [Generator.image].
+  static List<int> _escPrintImage(
+    Generator g,
+    img.Image raster, {
+    required PosAlign align,
+    List<_EscCol>? columns,
+  }) {
+    if (raster.width <= 255 || raster.height <= 0) {
+      return g.image(raster, align: align);
+    }
+
+    final placed = _alignWideImage(raster, align);
+    final ends = (columns != null && placed.width == _paperDots)
+        ? _columnSliceEnds(columns, placed.width)
+        : _gridSliceEnds(placed.width);
+
+    final slices = <img.Image>[];
+    var x0 = 0;
+    for (final x1 in ends) {
+      final w = x1 - x0;
+      if (w <= 0) continue;
+      if (w > 255) {
+        throw StateError('image slice is $w dots wide');
+      }
+      slices.add(img.copyCrop(
+        placed,
+        x: x0,
+        y: 0,
+        width: w,
+        height: placed.height,
+      ));
+      x0 = x1;
+    }
+    if (slices.isEmpty) {
+      return g.image(raster, align: align);
+    }
+
+    final bands = [for (final slice in slices) _escStarBands(slice)];
+    final out = <int>[];
+    out.addAll(g.setStyles(const PosStyles(align: PosAlign.left)));
+    out.addAll(const [0x1B, 0x33, 0x00]);
+    final bandCount = bands.first.length;
+    for (var band = 0; band < bandCount; band++) {
+      for (final sliceBands in bands) {
+        if (band < sliceBands.length) out.addAll(sliceBands[band]);
+      }
+      out.add(0x0A);
+    }
+    out.addAll(const [0x1B, 0x32]);
+    return out;
+  }
+
+  static int get _paperDots => PrintConfig.is80mm ? 576 : 384;
+
+  static img.Image _alignWideImage(img.Image source, PosAlign align) {
+    final paper = _paperDots;
+    if (source.width >= paper || align == PosAlign.left) return source;
+    final canvas = img.Image(width: paper, height: source.height);
+    img.fill(canvas, color: img.ColorRgb8(255, 255, 255));
+    final x = align == PosAlign.right
+        ? paper - source.width
+        : (paper - source.width) ~/ 2;
+    img.compositeImage(canvas, source, dstX: x, dstY: 0);
+    return canvas;
+  }
+
+  /// Column edges, then a 12-dot grid where one column is still too wide.
+  static List<int> _columnSliceEnds(List<_EscCol> columns, int totalWidth) {
+    final cell = _paperDots ~/ _width;
+    final bounds = <int>[0];
+    var x = 0;
+    for (final col in columns) {
+      x += col.chars * cell;
+      if (x > 0 && x < totalWidth) bounds.add(x);
+    }
+    bounds.add(totalWidth);
+    return _sliceEnds(bounds, totalWidth, cell);
+  }
+
+  static List<int> _gridSliceEnds(int totalWidth) {
+    final cell = _paperDots ~/ _width;
+    return _sliceEnds([0, totalWidth], totalWidth, cell);
+  }
+
+  static List<int> _sliceEnds(List<int> bounds, int totalWidth, int cell) {
+    const maxDots = 255;
+    final ends = <int>[];
+    var start = 0;
+    var cursor = 0;
+    for (final bound in bounds) {
+      if (bound <= start) continue;
+      if (bound - start <= maxDots) {
+        cursor = bound;
+        continue;
+      }
+      if (cursor > start) {
+        ends.add(cursor);
+        start = cursor;
+      }
+      while (bound - start > maxDots) {
+        var cut = start + maxDots;
+        if (cell > 1) {
+          final snapped = (cut ~/ cell) * cell;
+          if (snapped > start) cut = snapped;
+        }
+        ends.add(cut);
+        start = cut;
+      }
+      cursor = bound;
+    }
+    if (ends.isEmpty || ends.last != totalWidth) ends.add(totalWidth);
+    return ends;
+  }
+
+  /// One ESC * command per 24-dot band, without the line feed.
+  static List<List<int>> _escStarBands(img.Image source) {
+    final image = img.Image.from(source);
+    img.invert(image);
+    img.flipHorizontal(image);
+    final rotated = img.copyRotate(image, angle: 270);
+    final blobs = _toEscStarColumns(rotated, 24);
+    final n = rotated.height;
+    if (n <= 0 || n > 255) {
+      throw StateError('ESC * width $n');
+    }
+    final header = <int>[0x1B, 0x2A, 0x21, n & 0xFF, 0];
+    return [
+      for (final blob in blobs) [...header, ..._packEscStarBits(blob)],
+    ];
+  }
+
+  static List<List<int>> _toEscStarColumns(img.Image imgSrc, int lineHeight) {
+    final image = img.Image.from(imgSrc);
+    final widthPx = (image.width + lineHeight) - (image.width % lineHeight);
+    final heightPx = image.height;
+    final bigger = img.Image(width: widthPx, height: heightPx);
+    img.fill(bigger, color: img.ColorRgb8(0, 0, 0));
+    img.compositeImage(bigger, image, dstX: 0, dstY: 0);
+
+    final blobs = <List<int>>[];
+    var left = 0;
+    while (left < widthPx) {
+      var slice = img.copyCrop(
+        bigger,
+        x: left,
+        y: 0,
+        width: lineHeight,
+        height: heightPx,
+      );
+      if (slice.numChannels > 2) slice = img.grayscale(slice);
+      final oneChannel =
+          slice.numChannels > 1 ? slice.convert(numChannels: 1) : slice;
+      blobs.add(oneChannel.getBytes());
+      left += lineHeight;
+    }
+    return blobs;
+  }
+
+  static List<int> _packEscStarBits(List<int> bytes) {
+    const pxPerLine = 8;
+    const threshold = 127;
+    final res = <int>[];
+    for (var i = 0; i < bytes.length; i += pxPerLine) {
+      var newVal = 0;
+      for (var j = 0; j < pxPerLine; j++) {
+        final on = i + j < bytes.length && bytes[i + j] > threshold;
+        newVal = ((0xFFFFFFFF ^ (0x1 << (pxPerLine - j))) & newVal) |
+            ((on ? 1 : 0) << (pxPerLine - j));
+      }
+      res.add(newVal ~/ 2);
+    }
+    return res;
+  }
+
+  /// Failed column image → the same padded text row, so QTY stays under
+  /// the heading. Characters the printer cannot encode become "?".
+  static List<int> _paddedColumnFallback(
+    Generator g,
+    List<_EscCol> columns,
+    PosStyles styles,
+  ) {
+    final fallback = columns.map((c) {
+      final t = _latin1Safe(c.text);
+      return switch (c.align) {
+        TextAlign.center => _padC(t, c.chars),
+        TextAlign.right => _padL(t, c.chars),
+        _ => _padR(t, c.chars),
+      };
+    }).join();
+    return g.text(fallback, styles: styles);
   }
 
   static Future<img.Image?> _rasterizeColumnRow(
@@ -490,7 +766,14 @@ class EscPosFormatter {
       color: const Color(0xFF000000),
     );
 
-    final cells = <({img.Image image, int x0, int bandW, TextAlign align})>[];
+    final cells = <({
+      img.Image image,
+      int x0,
+      int bandW,
+      TextAlign align,
+      int leftPadChars,
+      int rightPadChars,
+    })>[];
     var maxH = 1;
     var xCursor = 0.0;
 
@@ -514,11 +797,21 @@ class EscPosFormatter {
       );
       var cell = img.decodeImage(png);
       if (cell == null) continue;
+      if (ReceiptTextRenderer.containsEmoji(text)) {
+        cell = _fitEmojiLine(cell, styles);
+      }
       if (cell.width > bandW) {
         cell = img.copyResize(cell, width: bandW);
       }
       if (cell.height > maxH) maxH = cell.height;
-      cells.add((image: cell, x0: x0, bandW: bandW, align: col.align));
+      cells.add((
+        image: cell,
+        x0: x0,
+        bandW: bandW,
+        align: col.align,
+        leftPadChars: col.leftPadChars,
+        rightPadChars: col.rightPadChars,
+      ));
     }
 
     if (cells.isEmpty) return null;
@@ -527,10 +820,14 @@ class EscPosFormatter {
     img.fill(canvas, color: img.ColorRgb8(255, 255, 255));
 
     for (final cell in cells) {
+      final cellDots = paperDots / _width;
+      final leftInset = (cell.leftPadChars * cellDots).round();
+      final rightInset = (cell.rightPadChars * cellDots).round();
       final rawX = switch (cell.align) {
         TextAlign.center => cell.x0 + ((cell.bandW - cell.image.width) ~/ 2),
-        TextAlign.right => cell.x0 + cell.bandW - cell.image.width,
-        _ => cell.x0,
+        TextAlign.right =>
+          cell.x0 + cell.bandW - rightInset - cell.image.width,
+        _ => cell.x0 + leftInset,
       };
       final maxX = (paperDots - cell.image.width).clamp(0, paperDots);
       final dstX = rawX.clamp(0, maxX);
@@ -990,7 +1287,13 @@ class EscPosFormatter {
           g,
           [
             _EscCol(itemNameLines.first, itemWidth),
-            _EscCol(qtyDisplay, qtyWidth, align: TextAlign.center),
+            _EscCol(
+              qtyDisplay,
+              qtyWidth,
+              leftPadChars: qtyDisplay.length >= qtyWidth
+                  ? 0
+                  : (qtyWidth - qtyDisplay.length) ~/ 2,
+            ),
             _EscCol(_formatMoney(amt), amtWidth, align: TextAlign.right),
             if (show80mmDate)
               _EscCol(dateStr, dateWidth, align: TextAlign.right),
@@ -1100,10 +1403,8 @@ class EscPosFormatter {
     final vatTax = d('vat_tax');
     final packingCharge = d('packing_charge') ?? 0;
     final grantAmount = d('grant_amount');
-    final paymentAmount = d('payment_amount');
     final roomAdvance = d('room_advance_pay');
     final roomPending = d('room_remaining_pay');
-    final roundOff = d('');
     final isAggregator = bill['is_aggregator'] == true;
     final paymentStatus = bill['payment_status']?.toString() ?? '';
     final paymentMethod = bill['payment_method']?.toString() ?? '';
@@ -1305,11 +1606,20 @@ class EscPosFormatter {
       );
     }
 
+    // Total — room = payment_amount, normal = grant_amount.
+    // Rounded when profile.total_round == Yes.
+    final totalAmount =
+        ReceiptBusinessLogic.printedBillTotal(bill, profile);
+    final roundOff = ReceiptBusinessLogic.roundOffAmount(bill, profile);
+    if (roundOff.abs() >= 0.005) {
+      b += await _escPrintLine(g, 
+        _alignRightLabelValue('Round Off', roundOff.toStringAsFixed(2)),
+        styles: _escStyle(_style.billAmountLine),
+      );
+    }
+
     b += await _escPrintLine(g, lineDashes,
         styles: const PosStyles(align: PosAlign.center, bold: true));
-
-    // Total — room = payment_amount, normal = grant_amount
-    final totalAmount = isRoomOrder ? paymentAmount : grantAmount;
     final paymentLabel = isRoomOrder || isAggregator ? '' : payLabel();
     if (paymentLabel.isEmpty ||
         _sameEscStyle(_style.billTotal, _style.billPaidBy)) {
@@ -1639,7 +1949,12 @@ class EscPosFormatter {
           [
             _EscCol(sr, srWidth),
             _EscCol(itemNameLines.first, itemWidth),
-            _EscCol(qtyString, qtyWidth, align: TextAlign.left),
+            _EscCol(
+              qtyString,
+              qtyWidth,
+              align: TextAlign.right,
+              rightPadChars: 2,
+            ),
           ],
           styles: kotItemStyles,
         );
@@ -1898,7 +2213,12 @@ class EscPosFormatter {
           [
             _EscCol(sr, srWidth),
             _EscCol(itemNameLines.first, itemWidth),
-            _EscCol(qtyString, qtyWidth, align: TextAlign.left),
+            _EscCol(
+              qtyString,
+              qtyWidth,
+              align: TextAlign.right,
+              rightPadChars: 2,
+            ),
           ],
           styles: kotItemStyles,
         );
@@ -2120,7 +2440,8 @@ class EscPosFormatter {
   /// (e.g. "બરફી 100gm") onto separate lines; keep those names as one
   /// raster line. The image renderer wraps them to the paper width.
   static List<String> _wrapItemName(String text, int width) {
-    final clean = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+    final clean =
+        _plainPunctuation(text).replaceAll(RegExp(r'\s+'), ' ').trim();
     if (clean.isEmpty) return [''];
     if (_needsRaster(clean)) return [clean];
     return _wrapText(clean, width);

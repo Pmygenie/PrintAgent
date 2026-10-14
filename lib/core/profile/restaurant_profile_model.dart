@@ -16,6 +16,7 @@ class RestaurantProfileModel {
   final String kotLanguage;
   final String restaurantFor;
   final String serviceChargeText;
+  final String totalRound;
 
   const RestaurantProfileModel({
     this.restaurantId = 0,
@@ -35,6 +36,7 @@ class RestaurantProfileModel {
     this.kotLanguage = 'English',
     this.restaurantFor = '',
     this.serviceChargeText = 'Service Charge',
+    this.totalRound = 'No',
   });
 
   String get serviceChargeLabel {
@@ -105,6 +107,7 @@ class RestaurantProfileModel {
       restaurantFor: restaurantFor,
       serviceChargeText:
           settings['service_chrg_taxt']?.toString().trim() ?? 'Service Charge',
+      totalRound: restaurant['total_round']?.toString() ?? 'No',
     );
   }
 
@@ -128,6 +131,7 @@ class RestaurantProfileModel {
       restaurantFor: json['restaurantFor']?.toString() ?? '',
       serviceChargeText:
           json['serviceChargeText']?.toString().trim() ?? 'Service Charge',
+      totalRound: json['totalRound']?.toString() ?? 'No',
     );
   }
 
@@ -150,6 +154,7 @@ class RestaurantProfileModel {
       'kotLanguage': kotLanguage,
       'restaurantFor': restaurantFor,
       'serviceChargeText': serviceChargeText,
+      'totalRound': totalRound,
     };
   }
 

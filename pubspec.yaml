@@ -112,3 +112,9 @@ flutter:
       fonts:
         - asset: assets/fonts/Rupee_Foradian.ttf
           weight: 400
+    - family: ReceiptEmoji
+      fonts:
+        - asset: assets/fonts/NotoEmoji-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/NotoEmoji-Regular.ttf
+          weight: 700
