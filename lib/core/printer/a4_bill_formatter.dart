@@ -496,8 +496,8 @@ class A4BillFormatter {
       if (isAggregator) {
         taxLines.add(_AmountLine('Total Tax', gstTax.toStringAsFixed(2)));
       } else {
-        taxLines.add(_AmountLine('CGST', (gstTax / 2).toStringAsFixed(2)));
-        taxLines.add(_AmountLine('SGST', (gstTax / 2).toStringAsFixed(2)));
+        taxLines.add(_AmountLine('CGST(2.5%)', (gstTax / 2).toStringAsFixed(2)));
+        taxLines.add(_AmountLine('SGST(2.5%)', (gstTax / 2).toStringAsFixed(2)));
       }
     }
     if (vatTax > 0) {

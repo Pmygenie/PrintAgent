@@ -1038,8 +1038,8 @@ class EscPosFormatter {
     await line('Sub Total', d('order_subtotal').toStringAsFixed(2));
     final gstTax = d('gst_tax');
     if (gstTax > 0) {
-      await line('CGST', (gstTax / 2).toStringAsFixed(2));
-      await line('SGST', (gstTax / 2).toStringAsFixed(2));
+      await line('CGST(2.5%)', (gstTax / 2).toStringAsFixed(2));
+      await line('SGST(2.5%)', (gstTax / 2).toStringAsFixed(2));
     }
     final vatTax = d('vat_tax');
     if (vatTax > 0) {
@@ -1577,11 +1577,11 @@ class EscPosFormatter {
       } else {
         final half = gstTax / 2;
         b += await _escPrintLine(g, 
-          _alignRightLabelValue('CGST', half.toStringAsFixed(2)),
+          _alignRightLabelValue('CGST(2.5%)', half.toStringAsFixed(2)),
           styles: _escStyle(_style.billAmountLine),
         );
         b += await _escPrintLine(g, 
-          _alignRightLabelValue('SGST', half.toStringAsFixed(2)),
+          _alignRightLabelValue('SGST(2.5%)', half.toStringAsFixed(2)),
           styles: _escStyle(_style.billAmountLine),
         );
       }

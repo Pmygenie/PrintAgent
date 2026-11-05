@@ -274,7 +274,8 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
       _contentWidthPt - (_is80mm ? 20.0 : 8.0) - 2;
 
   /// Page format with configurable margins.
-  /// Height is infinite — thermal printers cut at content end.
+  /// Used by KOT / cancel KOT (`pw.Page`). Keep finite height so those paths
+  /// stay as they already print.
   static PdfPageFormat get _pageFormat {
     final widthMm = _is80mm ? 72.0 : 48.0;
     log('widthMm $widthMm');
@@ -282,6 +283,20 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
     return PdfPageFormat(
       widthMm * PdfPageFormat.mm,
       80000,
+      // double.infinity,
+      marginLeft: _style.marginLeftMm * PdfPageFormat.mm,
+      marginRight: _style.marginRightMm * PdfPageFormat.mm,
+      marginTop: _style.marginTopMm * PdfPageFormat.mm,
+      marginBottom: _style.marginBottomMm * PdfPageFormat.mm,
+    );
+  }
+
+  /// Thermal bill only: one roll page sized to content (not A4, not KOT).
+  static PdfPageFormat get _billRollFormat {
+    final widthMm = _is80mm ? 72.0 : 48.0;
+    return PdfPageFormat(
+      widthMm * PdfPageFormat.mm,
+      double.infinity,
       marginLeft: _style.marginLeftMm * PdfPageFormat.mm,
       marginRight: _style.marginRightMm * PdfPageFormat.mm,
       marginTop: _style.marginTopMm * PdfPageFormat.mm,
@@ -589,7 +604,8 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
   // BILL PAGE
   // ═══════════════════════════════════════════════════════════════════
 
-  static Future<pw.MultiPage> _buildBillPage(
+  // static Future<pw.MultiPage> _buildBillPage(
+  static Future<pw.Page> _buildBillPage(
     RestaurantOrder o,
     RestaurantProfileModel profile,
     pw.MemoryImage? logoImage,
@@ -677,9 +693,14 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
           )
         : const <pw.Widget>[];
 
-    return pw.MultiPage(
-      pageFormat: _pageFormat,
-      build: (_) => [
+    // return pw.MultiPage(
+    //   pageFormat: _pageFormat,
+    //   build: (_) => [
+    return pw.Page(
+      pageFormat: _billRollFormat,
+      build: (_) => pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        children: [
         // ── Logo ──
         if (logoImage != null) ...[
           pw.Center(
@@ -807,8 +828,8 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
           if (isAggregator)
             ..._billAmountLineWidgets('Total Tax', gstTax.toStringAsFixed(2))
           else ...[
-            ..._billAmountLineWidgets('CGST', (gstTax / 2).toStringAsFixed(2)),
-            ..._billAmountLineWidgets('SGST', (gstTax / 2).toStringAsFixed(2)),
+            ..._billAmountLineWidgets('CGST(2.5%)', (gstTax / 2).toStringAsFixed(2)),
+            ..._billAmountLineWidgets('SGST(2.5%)', (gstTax / 2).toStringAsFixed(2)),
           ],
         ],
         if (vatTax > 0)
@@ -911,8 +932,11 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
             style: _text(size: _footerSize, bold: _footerBold),
           ),
         ),
-      ],
+        ],
+      ),
     );
+    //   ],
+    // );
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -1889,9 +1913,9 @@ _boldFont = await PdfGoogleFonts.hindVadodaraBold();
         _billAmountLineWidgets('Sub Total', subTotal.toStringAsFixed(2)));
     if (gstTax > 0) {
       widgets.addAll(
-          _billAmountLineWidgets('CGST', (gstTax / 2).toStringAsFixed(2)));
+          _billAmountLineWidgets('CGST(2.5%)', (gstTax / 2).toStringAsFixed(2)));
       widgets.addAll(
-          _billAmountLineWidgets('SGST', (gstTax / 2).toStringAsFixed(2)));
+          _billAmountLineWidgets('SGST(2.5%)', (gstTax / 2).toStringAsFixed(2)));
     }
     if (vatTax > 0) {
       widgets.addAll(_billAmountLineWidgets('VAT', vatTax.toStringAsFixed(2)));

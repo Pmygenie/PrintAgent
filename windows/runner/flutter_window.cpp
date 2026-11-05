@@ -3,6 +3,7 @@
 #include <optional>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "utils.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -22,12 +23,20 @@ bool FlutterWindow::OnCreate() {
       frame.right - frame.left, frame.bottom - frame.top, project_);
   // Ensure that basic setup of the controller was successful.
   if (!flutter_controller_->engine() || !flutter_controller_->view()) {
+    StartupLog("Flutter engine or view failed to start");
     return false;
   }
+
+  StartupLog("RegisterPlugins begin");
   RegisterPlugins(flutter_controller_->engine());
+  StartupLog("RegisterPlugins end");
+
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
+  this->Show();
+
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
+    StartupLog("first Flutter frame");
     this->Show();
   });
 

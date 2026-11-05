@@ -2,8 +2,12 @@
 
 #include <dwmapi.h>
 #include <flutter_windows.h>
+#include <stdio.h>
 
 #include "resource.h"
+#include "utils.h"
+
+const wchar_t kPrinterAgentWindowClass[] = L"MyGeniePrinterAgentWindow";
 
 namespace {
 
@@ -15,8 +19,6 @@ namespace {
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
 #define DWMWA_USE_IMMERSIVE_DARK_MODE 20
 #endif
-
-constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
 
 /// Registry key for app theme preference.
 ///
@@ -90,7 +92,7 @@ const wchar_t* WindowClassRegistrar::GetWindowClass() {
   if (!class_registered_) {
     WNDCLASS window_class{};
     window_class.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    window_class.lpszClassName = kWindowClassName;
+    window_class.lpszClassName = kPrinterAgentWindowClass;
     window_class.style = CS_HREDRAW | CS_VREDRAW;
     window_class.cbClsExtra = 0;
     window_class.cbWndExtra = 0;
@@ -103,11 +105,11 @@ const wchar_t* WindowClassRegistrar::GetWindowClass() {
     RegisterClass(&window_class);
     class_registered_ = true;
   }
-  return kWindowClassName;
+  return kPrinterAgentWindowClass;
 }
 
 void WindowClassRegistrar::UnregisterWindowClass() {
-  UnregisterClass(kWindowClassName, nullptr);
+  UnregisterClass(kPrinterAgentWindowClass, nullptr);
   class_registered_ = false;
 }
 
@@ -141,16 +143,33 @@ bool Win32Window::Create(const std::wstring& title,
       nullptr, nullptr, GetModuleHandle(nullptr), this);
 
   if (!window) {
+    StartupLog("CreateWindow failed");
     return false;
   }
 
+  char hwnd_line[80];
+  snprintf(hwnd_line, sizeof(hwnd_line), "CreateWindow hwnd=%p", window);
+  StartupLog(hwnd_line);
+
   UpdateTheme(window);
+
+  // Show before Flutter/plugin init so a hung first frame still leaves a
+  // visible window (and a taskbar button) instead of a background process.
+  ShowWindow(window, SW_SHOWNORMAL);
+  UpdateWindow(window);
+  StartupLog(IsWindowVisible(window) ? "window shown (pre-engine)"
+                                     : "window ShowWindow returned but not visible");
 
   return OnCreate();
 }
 
 bool Win32Window::Show() {
-  return ShowWindow(window_handle_, SW_SHOWNORMAL);
+  const BOOL shown = ShowWindow(window_handle_, SW_SHOWNORMAL);
+  if (window_handle_ != nullptr) {
+    StartupLog(IsWindowVisible(window_handle_) ? "Show() visible=1"
+                                               : "Show() visible=0");
+  }
+  return shown;
 }
 
 // static

@@ -137,12 +137,36 @@ import 'core/profile/restaurant_profile_store.dart';
 import 'ui/screens/home_screen.dart';
 import 'ui/screens/login_screen.dart';
 
+Future<void> _startupLog(String message) async {
+  if (!Platform.isWindows) return;
+  try {
+    final local = Platform.environment['LOCALAPPDATA'];
+    if (local == null || local.isEmpty) return;
+    final dir = Directory('$local\\PrinterAgent');
+    if (!dir.existsSync()) {
+      dir.createSync(recursive: true);
+    }
+    final file = File('${dir.path}\\startup.log');
+    final ts = DateTime.now().toIso8601String();
+    await file.writeAsString(
+      '$ts pid=$pid dart: $message\n',
+      mode: FileMode.append,
+      flush: true,
+    );
+  } catch (_) {}
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await _startupLog('main() start');
 
   // 1. Load saved config
   await PrintConfig.load();
+  await _startupLog('PrintConfig.load done');
   final savedPrinters = await PrinterConfigStorage.load();
+  await _startupLog(
+    'PrinterConfigStorage.load done printers=${savedPrinters.length}',
+  );
 
   // Sync restaurant profile in background (fire and forget)
   _syncRestaurantProfileOnStart();
@@ -206,11 +230,18 @@ void main() async {
   final printers = savedPrinters.isNotEmpty
       ? savedPrinters
       : [_buildDefaultPrinterConfig()];
+  await _startupLog('registerAll printers=${printers.length}');
 
   final queueManager = PrintQueueManager()..registerAll(printers);
   final router       = PrinterRouter(printers);
   final socket       = WindowsSocketService(queueManager, router)..connect();
+  await _startupLog('socket.connect() issued');
 
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    _startupLog('first frame');
+  });
+
+  await _startupLog('runApp');
   runApp(PrintAgentApp(windowsSocket: socket, queueManager: queueManager));
 }
 

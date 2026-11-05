@@ -6,6 +6,71 @@
 #include <windows.h>
 
 #include <iostream>
+#include <string>
+
+namespace {
+
+constexpr DWORD kMaxStartupLogBytes = 512 * 1024;
+
+std::wstring StartupLogPath() {
+  wchar_t local_app_data[MAX_PATH] = {};
+  const DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", local_app_data,
+                                          MAX_PATH);
+  if (n == 0 || n >= MAX_PATH) {
+    return std::wstring();
+  }
+  return std::wstring(local_app_data) + L"\\PrinterAgent\\startup.log";
+}
+
+void EnsureStartupLogDir(const std::wstring& log_path) {
+  const auto slash = log_path.find_last_of(L"\\/");
+  if (slash == std::wstring::npos) {
+    return;
+  }
+  const std::wstring dir = log_path.substr(0, slash);
+  CreateDirectoryW(dir.c_str(), nullptr);
+}
+
+}  // namespace
+
+void StartupLog(const std::string& message) {
+  const std::wstring path = StartupLogPath();
+  if (path.empty()) {
+    return;
+  }
+  EnsureStartupLogDir(path);
+
+  WIN32_FILE_ATTRIBUTE_DATA info{};
+  if (GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &info)) {
+    ULARGE_INTEGER size;
+    size.LowPart = info.nFileSizeLow;
+    size.HighPart = info.nFileSizeHigh;
+    if (size.QuadPart > kMaxStartupLogBytes) {
+      DeleteFileW(path.c_str());
+    }
+  }
+
+  HANDLE file = CreateFileW(path.c_str(), FILE_APPEND_DATA,
+                            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
+    return;
+  }
+
+  SYSTEMTIME st{};
+  GetLocalTime(&st);
+  char line[1024];
+  const int n = snprintf(
+      line, sizeof(line),
+      "%04d-%02d-%02d %02d:%02d:%02d.%03d pid=%lu %s\n",
+      st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond,
+      st.wMilliseconds, GetCurrentProcessId(), message.c_str());
+  if (n > 0) {
+    DWORD written = 0;
+    WriteFile(file, line, static_cast<DWORD>(n), &written, nullptr);
+  }
+  CloseHandle(file);
+}
 
 void CreateAndAttachConsole() {
   if (::AllocConsole()) {

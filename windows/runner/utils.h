@@ -8,6 +8,10 @@
 // it for both the runner and the Flutter library.
 void CreateAndAttachConsole();
 
+// Appends one line to %LOCALAPPDATA%\PrinterAgent\startup.log.
+// Best-effort: never throws, never blocks app startup on failure.
+void StartupLog(const std::string& message);
+
 // Takes a null-terminated wchar_t* encoded in UTF-16 and returns a std::string
 // encoded in UTF-8. Returns an empty std::string on failure.
 std::string Utf8FromUtf16(const wchar_t* utf16_string);

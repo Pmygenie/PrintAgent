@@ -253,8 +253,8 @@ class BillRenderer {
         canvas.drawLabelValue('GST', gstTax.toStringAsFixed(2), amountStyle);
       } else {
         final half = gstTax / 2;
-        canvas.drawLabelValue('CGST', half.toStringAsFixed(2), amountStyle);
-        canvas.drawLabelValue('SGST', half.toStringAsFixed(2), amountStyle);
+        canvas.drawLabelValue('CGST(2.5%)', half.toStringAsFixed(2), amountStyle);
+        canvas.drawLabelValue('SGST(2.5%)', half.toStringAsFixed(2), amountStyle);
       }
     }
     if (vatTax > 0) {
@@ -518,9 +518,9 @@ class BillRenderer {
     final gstTax = d('gst_tax');
     if (gstTax > 0) {
       canvas.drawLabelValue(
-          'CGST', (gstTax / 2).toStringAsFixed(2), amountStyle);
+          'CGST(2.5%)', (gstTax / 2).toStringAsFixed(2), amountStyle);
       canvas.drawLabelValue(
-          'SGST', (gstTax / 2).toStringAsFixed(2), amountStyle);
+          'SGST(2.5%)', (gstTax / 2).toStringAsFixed(2), amountStyle);
     }
     final vatTax = d('vat_tax');
     if (vatTax > 0) {

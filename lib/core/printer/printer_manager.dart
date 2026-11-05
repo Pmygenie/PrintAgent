@@ -68,9 +68,32 @@ class PrinterManager {
       }
 
       for (int i = 0; i < copies; i++) {
+        final associated = job.order.billData['associated_orders'];
+        final isRoomBill = job.type == PrintType.bill &&
+            !PrintConfig.isA4 &&
+            associated is List &&
+            associated.isNotEmpty;
+
+        // final result = await bounded(
+        //   Future.value(Printing.directPrintPdf(
+        //     printer: targetPrinter,
+        //     onLayout: (PdfPageFormat format) async => pdfBytes,
+        //     name: 'BILL_${job.order.displayOrderId}_COPY_${i + 1}',
+        //   )),
+        //   OpTimeout.windowsDirectPrint,
+        //   'Windows spool of BILL_${job.order.displayOrderId} copy ${i + 1}',
+        // );
         final result = await bounded(
           Future.value(Printing.directPrintPdf(
             printer: targetPrinter,
+            format: isRoomBill
+                ? PdfPageFormat(
+                    PrintConfig.is80mm
+                        ? 72 * PdfPageFormat.mm
+                        : 48 * PdfPageFormat.mm,
+                    3276 * PdfPageFormat.mm,
+                  )
+                : PdfPageFormat.standard,
             onLayout: (PdfPageFormat format) async => pdfBytes,
             name: 'BILL_${job.order.displayOrderId}_COPY_${i + 1}',
           )),
